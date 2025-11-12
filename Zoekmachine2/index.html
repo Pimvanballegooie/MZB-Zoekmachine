@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monné Zoekmachine — Gehoste versie (CSV ingebouwd)</title>
+<style>
+  :root { --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --chip:#1f2937; --chip-border:#374151; }
+  html,body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial; }
+  .container { max-width:1100px; margin:0 auto; padding:24px; }
+  h1 { font-size:clamp(22px,2.8vw,32px); margin:0 0 8px; }
+  .sub { color:var(--muted); margin-bottom:20px; }
+  .panel { background:#111827; border:1px solid #1f2937; border-radius:16px; padding:16px; }
+  .grid { display:grid; grid-template-columns: 1fr; gap:12px; }
+  @media(min-width:900px) { .grid { grid-template-columns: 1fr 1fr 1fr; } }
+  label { font-size:14px; color:var(--muted); display:block; margin-bottom:6px; }
+  select, input[type="text"] { width:100%; padding:10px 12px; border-radius:12px; border:1px solid #334155; background:#0b1220; color:#e5e7eb; }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  .btn { padding:10px 14px; border-radius:12px; border:1px solid #374151; background:#0b1220; color:#e5e7eb; cursor:pointer; }
+  .btn:hover { border-color:#475569; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .chip { background:var(--chip); border:1px solid var(--chip-border); padding:6px 10px; border-radius:999px; font-size:12px; }
+  table { width:100%; border-collapse:separate; border-spacing:0 10px; margin-top:16px; }
+  thead th { text-align:left; font-size:12px; color:var(--muted); font-weight:600; padding:0 12px; }
+  tbody tr { background:#0b1220; border:1px solid #1f2937; }
+  tbody td { padding:12px; vertical-align:top; }
+  .name { font-weight:600; }
+  .count { color:var(--muted); font-size:13px; margin-top:8px; }
+  .footer { color:var(--muted); font-size:12px; margin-top:20px; }
+  .warn { color:#fca5a5; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Zoek collega op Locatie & Categorie</h1>
+  <div class="sub">Gehoste versie met CSV ingebouwd. Indien de directe CSV door CORS wordt geblokkeerd, kun je de proxy-knop gebruiken.</div>
+
+  <div class="panel">
+    <div id="status" class="count">CSV laden…</div>
+    <div class="controls" style="margin-top:8px;">
+      <button id="retryDirect" class="btn">Opnieuw (direct laden)</button>
+      <button id="retryProxy" class="btn">Laden via CORS-proxy</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="grid">
+      <div>
+        <label for="locSelect">Locatie</label>
+        <select id="locSelect" multiple size="6" aria-label="Filter op locatie"></select>
+      </div>
+      <div>
+        <label for="catSelect">Categorie (incl. specifieke behandelingen)</label>
+        <select id="catSelect" multiple size="6" aria-label="Filter op categorie"></select>
+      </div>
+      <div>
+        <label for="q">Zoek (naam of vrije tekst)</label>
+        <input id="q" type="text" placeholder="Typ om te zoeken...">
+        <div class="controls">
+          <button id="clear" class="btn">Wis filters</button>
+          <button id="export" class="btn">Exporteer CSV</button>
+        </div>
+        <div class="count" id="count">0 resultaten</div>
+        <div class="chips" id="activeChips"></div>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Naam</th><th>Locaties</th><th>Categorieën</th></tr>
+    </thead>
+    <tbody id="results"></tbody>
+  </table>
+
+  <div class="footer">Tip: gebruik Ctrl/Cmd-klik om meerdere items te selecteren.</div>
+</div>
+
+<script>
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTjIWYvik5MqYcZV9R5jWEbkDRt72UFieHWtsiz85eoGVsIlrj6eieTKYbqcfgE2OaP3NvPjG22ovpn/pub?gid=1260760560&single=true&output=csv";
+// Publieke CORS-proxy als fallback (alleen gebruiken als direct laden faalt)
+const PROXY  = "https://cors.isomorphic-git.org/";
+
+function parseCSV(text){
+  const rows=[]; let row=[], field='', i=0, inQ=false;
+  while(i<text.length){ const c=text[i];
+    if(inQ){ if(c==='\"'){ if(text[i+1]==='\"'){ field+='\"'; i++; } else { inQ=false; } } else { field+=c; } }
+    else { if(c==='\"'){ inQ=true; } else if(c===','){ row.push(field); field=''; } else if(c==='\n'){ row.push(field); rows.push(row); row=[]; field=''; } else if(c==='\r'){ } else { field+=c; } }
+    i++;
+  }
+  if(field.length||inQ||row.length){ row.push(field); rows.push(row); }
+  return rows;
+}
+function normalizeHeader(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' ').replace(/\n|\r/g,' '); }
+function titleCase(s){ return String(s||'').toLowerCase().replace(/\b\w/g,m=>m.toUpperCase()); }
+function prettify(s){ return titleCase(String(s||'').replace(/\s*\([^)]*\)\s*/g,'')); }
+function splitLocations(v){ const raw=String(v||'').trim(); if(!raw) return []; return raw.split(/[,;/]| en /i).map(x=>x.trim()).filter(Boolean); }
+function isChecked(v){ const s=String(v||'').trim().toLowerCase(); return ['1','true','ja','yes','x','checked','waar','klopt','on'].includes(s); }
+
+let DATA=[], ALL_LOCATIONS=[], ALL_CATEGORIES=[];
+const locSelect=document.getElementById('locSelect');
+const catSelect=document.getElementById('catSelect');
+const q=document.getElementById('q');
+const results=document.getElementById('results');
+const countEl=document.getElementById('count');
+const chipsEl=document.getElementById('activeChips');
+const statusEl=document.getElementById('status');
+
+function setStatus(msg, warn=false){ statusEl.textContent=msg||''; statusEl.className=warn?'warn':'count'; }
+function populateSelect(sel, items){ sel.innerHTML=''; items.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); }); }
+function selectedValues(sel){ return Array.from(sel.selectedOptions).map(o=>o.value); }
+function renderChips(f){ chipsEl.innerHTML=''; const add=(l,a)=>a.forEach(v=>{ const c=document.createElement('span'); c.className='chip'; c.textContent=`${l}: ${v}`; chipsEl.appendChild(c); }); add('Loc',f.locations); add('Cat',f.categories); if(f.q){ const c=document.createElement('span'); c.className='chip'; c.textContent=`Zoek: "${f.q}"`; chipsEl.appendChild(c);} }
+
+function filterRecords(){
+  const f={ locations:selectedValues(locSelect), categories:selectedValues(catSelect), q:q.value.trim().toLowerCase() };
+  renderChips(f);
+  const filtered=DATA.filter(r=>{
+    if(f.locations.length){ const s=new Set(r.locations.map(x=>x.toLowerCase())); if(!f.locations.every(v=>s.has(v.toLowerCase()))) return false; }
+    if(f.categories.length){ const s=new Set(r.categories.map(x=>x.toLowerCase())); if(!f.categories.every(v=>s.has(v.toLowerCase()))) return false; }
+    if(f.q){ const hay=[r.name,...r.locations,...r.categories].join(" | ").toLowerCase(); if(!hay.includes(f.q)) return false; }
+    return true;
+  });
+  results.innerHTML='';
+  filtered.forEach(r=>{
+    const tr=document.createElement('tr');
+    const tdN=document.createElement('td'); tdN.innerHTML=`<div class="name">${r.name}</div>`;
+    const tdL=document.createElement('td'); tdL.innerHTML=r.locations.map(l=>`<span class="chip">${l}</span>`).join(" ");
+    const tdC=document.createElement('td'); tdC.innerHTML=r.categories.map(c=>`<span class="chip">${c}</span>`).join(" ");
+    tr.appendChild(tdN); tr.appendChild(tdL); tr.appendChild(tdC); results.appendChild(tr);
+  });
+  countEl.textContent=`${filtered.length} resultaten`;
+  return filtered;
+}
+
+document.getElementById('clear').addEventListener('click',()=>{
+  Array.from(locSelect.options).forEach(o=>o.selected=false);
+  Array.from(catSelect.options).forEach(o=>o.selected=false);
+  q.value="";
+  filterRecords();
+});
+document.getElementById('export').addEventListener('click',()=>{
+  const filtered=filterRecords();
+  const rows=[['Naam','Locaties','Categorieën'], ...filtered.map(r=>[r.name, r.locations.join('; '), r.categories.join('; ')])];
+  const csv=rows.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  const a=document.createElement('a'); a.href=url; a.download='monne_zoekresultaten.csv'; a.click(); URL.revokeObjectURL(url);
+});
+locSelect.addEventListener('change',filterRecords);
+catSelect.addEventListener('change',filterRecords);
+q.addEventListener('input',filterRecords);
+
+function buildFromRows(rows){
+  if(!rows||!rows.length) throw new Error('Lege dataset');
+  const header=rows[0].map(normalizeHeader);
+  const idx=(needles)=>{ for(let i=0;i<header.length;i++){ const h=header[i]; if(needles.some(n=>h.includes(n))) return i; } return -1; };
+
+  const iName=idx(['naam','voor- en achternaam','achternaam','collega','naam?']);
+  const iLoc=idx(['locatie','op welke locatie','werk je','standplaats','vestiging']);
+  if(iName<0||iLoc<0) throw new Error('Kon verplichte kolommen niet vinden (Naam en Locatie).');
+
+  const skip=new Set([iName,iLoc]);
+  let iSpec=-1; const catCols=[];
+  for(let c=0;c<header.length;c++){
+    const h=header[c];
+    if(skip.has(c)) continue;
+    if(h.includes('specifieke')||h.includes('specbeh')){ iSpec=c; continue; }
+    if(/(kinder|geriatrie|psychosomatisch|chronische|cz|wervelkolom|benen|armen)/.test(h)){
+      catCols.push({index:c,label:prettify(rows[0][c])});
+    }
+  }
+
+  const recs=[];
+  for(let r=1;r<rows.length;r++){
+    const row=rows[r];
+    if(!row||row.length===0) continue;
+    const name=(row[iName]||'').toString().trim();
+    if(!name) continue;
+    const locations=splitLocations(row[iLoc]||'');
+    const mains=[];
+    for(const col of catCols){
+      const v=row[col.index];
+      if(isChecked(v)) mains.push(col.label);
+    }
+    const specs=[];
+    if(iSpec>=0){
+      const raw=(row[iSpec]||'').toString().trim();
+      if(raw){
+        raw.split(',').forEach(p=>{
+          const clean=p.replace(/\s*\([^)]*\)\s*/g,'').trim();
+          if(clean) specs.push(titleCase(clean));
+        });
+      }
+    }
+    const categories=Array.from(new Set([...mains, ...specs])).sort((a,b)=>a.localeCompare(b));
+    recs.push({ name, locations, categories });
+  }
+
+  DATA=recs;
+  const locs=new Set(), cats=new Set();
+  recs.forEach(r=>{ r.locations.filter(Boolean).forEach(x=>locs.add(x)); r.categories.filter(Boolean).forEach(x=>cats.add(x)); });
+  populateSelect(locSelect, Array.from(locs).sort((a,b)=>a.localeCompare(b)));
+  populateSelect(catSelect, Array.from(cats).sort((a,b)=>a.localeCompare(b)));
+  setStatus('CSV geladen.');
+  filterRecords();
+}
+
+async function tryLoad(url){
+  setStatus('CSV laden…');
+  const res=await fetch(url);
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const text=await res.text();
+  const rows=parseCSV(text);
+  buildFromRows(rows);
+}
+async function loadDirect(){ try{ await tryLoad(CSV_URL); } catch(e){ setStatus('Direct laden geblokkeerd (CORS). Gebruik de proxy-knop.', true); console.error(e); } }
+async function loadProxy(){ try{ await tryLoad(PROXY + CSV_URL); setStatus('CSV geladen via proxy.'); } catch(e){ setStatus('Ook via proxy mislukt.', true); console.error(e); } }
+
+document.getElementById('retryDirect').addEventListener('click', loadDirect);
+document.getElementById('retryProxy').addEventListener('click', loadProxy);
+
+// Probeer eerst direct, en val na 3s automatisch terug op proxy als nodig.
+let fallbackTimer = setTimeout(() => { if(statusEl.textContent.includes('CSV laden')) loadProxy(); }, 3000);
+loadDirect().then(() => clearTimeout(fallbackTimer)).catch(() => {});
+</script>
+</body>
+</html>
