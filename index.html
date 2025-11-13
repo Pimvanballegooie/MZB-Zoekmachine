@@ -8,7 +8,7 @@
   :root{
     --bg:#0b1020; --panel:#0f172a; --muted:#94a3b8; --text:#e5e7eb;
     --border:#1f2937; --chip:#162039; --chip-b:#22314f;
-    --accent:#f97316; /* Monné oranje-accent */
+    --accent:#f97316; /* Monné oranje */
     --good:#22c55e; --warn:#eab308; --bad:#f43f5e;
   }
   html,body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial}
@@ -63,6 +63,7 @@
         <div class="sub">Locatie & (Sub)Categorie — Slim zoeken met match%</div>
       </div>
     </div>
+    <button id="refresh" class="btn-accent">Vernieuw data</button>
   </header>
 
   <div class="panel">
@@ -100,353 +101,93 @@
       </thead>
       <tbody id="results"></tbody>
     </table>
-    <div class="footer">Tip: meerdere locaties selecteren kan met Ctrl/Cmd-klik. De categorie-zoeker accepteert meerdere keuzes; klik op een chip om te verwijderen.</div>
+    <div class="footer">Automatisch bijgewerkt, of klik op "Vernieuw data" om direct te herladen.</div>
   </div>
 </div>
 
 <script>
 /* ===================== CONFIG ===================== */
-/* Jouw links (gepubliceerd als CSV) */
 const DATA_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQzg4Lc0Ffm3lmtQNSJPa5oPX3BMI0CNvWlhYuqT7u5zrtOlsG4-7urOd51M0TUg7DTvg-CH6GPm4_Q/pub?gid=1507012908&single=true&output=csv";
 const TAX_URL_DEFAULT  = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQAKYnsb6ueKbE3RDv9K7rOztmmdZ9KheaEGM_-UUnrln5PAU-k8AeKFmZt16eUF0HfvNGfYMlX8tsH/pub?gid=0&single=true&output=csv";
-const USE_PROXY = false;       // Zet op true als CORS roet in het eten gooit
+const USE_PROXY = false;
 const PROXY = "https://cors.isomorphic-git.org/";
 
-/* ===================== HELPERS ===================== */
-function parseCSV(text){
-  const rows=[]; let row=[], field='', i=0, q=false;
-  while(i<text.length){ const c=text[i];
-    if(q){ if(c==='\"'){ if(text[i+1]==='\"'){ field+='\"'; i++; } else { q=false; } } else { field+=c; } }
-    else { if(c==='\"'){ q=true; } else if(c===','){ row.push(field); field=''; }
-           else if(c==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
-           else if(c==='\r'){ } else { field+=c; } }
-    i++;
-  }
-  if(field.length||q||row.length){ row.push(field); rows.push(row); }
-  return rows;
-}
-function norm(s){ return String(s||'').trim().toLowerCase(); }
-function title(s){ return String(s||'').toLowerCase().replace(/\b\w/g,m=>m.toUpperCase()); }
-function cleanLabel(s){ return title(String(s||'').replace(/\s*\([^)]*\)\s*/g,'')); }
-function splitLoc(v){ const raw=String(v||'').trim(); if(!raw) return []; return raw.split(/[,;/]| en /i).map(x=>x.trim()).filter(Boolean); }
-function isChecked(v){ const s=norm(v); return ['1','true','ja','yes','x','checked','waar','klopt','on'].includes(s); }
+/* ========== HULPFUNCTIES ========== */
+function parseCSV(t){const r=[];let e=[],i="",o=0,n=!1;for(;o<t.length;){const l=t[o];if(n)'"'===l?'"'===t[o+1]?(i+='"',o++):n=!1:i+=l;else if('"'===l)n=!0;else if(","===l)e.push(i),i="";else if("\n"===l)e.push(i),r.push(e),e=[],i="";else if("\r"!==l)i+=l;o++}return(i.length||n||e.length)&&(e.push(i),r.push(e)),r}
+function norm(s){return String(s||"").trim().toLowerCase()}
+function cleanLabel(s){return String(s||"").replace(/\s*\([^)]*\)\s*/g,"").trim()}
+function splitLoc(v){const raw=String(v||"").trim();return raw?raw.split(/[,;/]| en /i).map(x=>x.trim()).filter(Boolean):[]}
+function isChecked(v){const s=norm(v);return["1","true","ja","yes","x","checked","waar","klopt","on"].includes(s)}
 
-/* ===================== STATE ===================== */
-let TAX = { heads: [], subsByHead: {} };   // Taxonomie
-let DATA = [];                              // Collega's
-let ALL_LOCS = [];
-let ALL_CATS = [];                          // Suggesties (head + sub)
-let SELECTED_CATS = [];                     // [{type:'head'|'sub', head:'', value:''}]
+/* ========== STATE ========== */
+let TAX={heads:[],subsByHead:{}},DATA=[],ALL_LOCS=[],ALL_CATS=[],SELECTED_CATS=[];
+const els={locFree:locFree,locSelect:locSelect,catInput:catInput,suggest:suggest,activeCat:activeCat,reset:reset,results:results,count:count};
 
-/* ===================== DOM ===================== */
-const els = {
-  locFree: document.getElementById('locFree'),
-  locSelect: document.getElementById('locSelect'),
-  catInput: document.getElementById('catInput'),
-  suggest: document.getElementById('suggest'),
-  activeCat: document.getElementById('activeCat'),
-  reset: document.getElementById('reset'),
-  results: document.getElementById('results'),
-  count: document.getElementById('count'),
-};
+/* ========== FETCH ========== */
+async function fetchCSV(url){const u=USE_PROXY?PROXY+url:url,res=await fetch(u);if(!res.ok)throw new Error("HTTP "+res.status);return parseCSV(await res.text())}
 
-/* ===================== FETCH ===================== */
-async function fetchCSV(url){
-  const u = USE_PROXY ? (PROXY+url) : url;
-  const res = await fetch(u);
-  if(!res.ok) throw new Error('HTTP '+res.status);
-  const txt = await res.text();
-  return parseCSV(txt);
-}
-
-/* ===================== TAXONOMIE ===================== */
+/* ========== TAXONOMIE ========== */
 function buildTaxonomy(rows){
-  if(!rows || !rows.length) throw new Error('Lege taxonomie CSV');
-  const heads = rows[0].map(cleanLabel).filter(Boolean);
-  const subsByHead = {};
+  const heads=rows[0].map(cleanLabel).filter(Boolean),subsByHead={};
   heads.forEach(h=>subsByHead[h]=[]);
-  for(let r=1;r<rows.length;r++){
-    const row = rows[r] || [];
-    for(let c=0;c<heads.length;c++){
-      const sub = cleanLabel(row[c]||"");
-      if(sub) subsByHead[heads[c]].push(sub);
-    }
-  }
-  TAX = { heads, subsByHead };
-  const cats = [];
-  heads.forEach(h=>{
-    cats.push({type:'head', head:h, value:h, label:h});
-    (subsByHead[h]||[]).forEach(s=>{
-      cats.push({type:'sub', head:h, value:s, label:`${s}  ·  ${h}`});
-    });
-  });
-  ALL_CATS = cats;
+  for(let r=1;r<rows.length;r++){const row=rows[r]||[];for(let c=0;c<heads.length;c++){const sub=cleanLabel(row[c]||"");if(sub)subsByHead[heads[c]].push(sub)}} 
+  TAX={heads,subsByHead};
+  const cats=[];heads.forEach(h=>{cats.push({type:"head",head:h,value:h,label:h});(subsByHead[h]||[]).forEach(s=>cats.push({type:"sub",head:h,value:s,label:`${s} · ${h}`}))});ALL_CATS=cats;
 }
 
-/* ===================== DATA ===================== */
+/* ========== DATA ========== */
 function buildData(rows){
-  if(!rows || !rows.length) throw new Error('Lege data CSV');
-  const header = rows[0].map(h => String(h||''));
-  const headerNorm = header.map(h=>norm(h).replace(/\s+/g,' ').replace(/\n|\r/g,' '));
-
-  const findCol = (needles) => {
-    for(let i=0;i<headerNorm.length;i++){
-      if(needles.some(n => headerNorm[i].includes(n))) return i;
-    }
-    return -1;
-  };
-
-  const iName = findCol(['naam','voor- en achternaam','achternaam','collega','naam?']);
-  const iLoc  = findCol(['locatie','op welke locatie','werk je','standplaats','vestiging']);
-  const iSpec = findCol(['specifieke behandelingen','specbeh','specifieke','behandelingen (specbeh)']);
-
-  if(iName < 0 || iLoc < 0) throw new Error('Kon verplichte kolommen niet vinden (Naam en Locatie).');
-
-  const skip = new Set([iName,iLoc,iSpec].filter(x=>x>=0));
-  const categoryColumns = [];
-  for(let c=0;c<header.length;c++){
-    if(skip.has(c)) continue;
-    const label = cleanLabel(header[c]);
-    if(label) categoryColumns.push({index:c,label});
+  const header=rows[0],headerNorm=header.map(h=>norm(h).replace(/\s+/g," "));
+  const findCol=needles=>{for(let i=0;i<headerNorm.length;i++)if(needles.some(n=>headerNorm[i].includes(n)))return i;return-1};
+  const iName=findCol(["naam","voor- en achternaam"]),iLoc=findCol(["locatie","werk"]),iSpec=findCol(["specifieke"]);
+  const skip=new Set([iName,iLoc,iSpec].filter(x=>x>=0)),cols=[];for(let c=0;c<header.length;c++){if(!skip.has(c)){const l=cleanLabel(header[c]);if(l)cols.push({index:c,label:l})}}
+  const out=[],locsSet=new Set();
+  for(let r=1;r<rows.length;r++){const row=rows[r];if(!row)continue;const name=row[iName]?.trim();if(!name)continue;
+    const locs=splitLoc(row[iLoc]);locs.forEach(l=>locsSet.add(l));
+    const mains=cols.filter(c=>isChecked(row[c.index])).map(c=>c.label);
+    const specs=iSpec>=0?(row[iSpec]||"").split(",").map(cleanLabel).filter(Boolean):[];
+    out.push({name,locations:locs,categories:[...new Set([...mains,...specs])]});
   }
-
-  const out = [];
-  const locsSet = new Set();
-  for(let r=1;r<rows.length;r++){
-    const row = rows[r];
-    if(!row || row.length===0) continue;
-    const name = (row[iName]||'').toString().trim();
-    if(!name) continue;
-
-    const locations = splitLoc(row[iLoc]||'');
-    locations.forEach(l=>locsSet.add(l));
-
-    const mains = [];
-    for(const col of categoryColumns){
-      if(isChecked(row[col.index])) mains.push(col.label);
-    }
-
-    const specs = [];
-    if(iSpec >= 0){
-      const raw=(row[iSpec]||'').toString().trim();
-      if(raw){
-        raw.split(',').forEach(p=>{
-          const clean = cleanLabel(p);
-          if(clean) specs.push(clean);
-        });
-      }
-    }
-    const categories = Array.from(new Set([...mains, ...specs]));
-    out.push({ name, locations, categories, raw:{mains,specs} });
-  }
-
-  DATA = out;
-  ALL_LOCS = Array.from(locsSet).sort((a,b)=>a.localeCompare(b));
+  DATA=out;ALL_LOCS=[...locsSet].sort()
 }
 
-/* ===================== UI ===================== */
-function populateLocations(){
-  const sel = els.locSelect;
-  sel.innerHTML = "";
-  ALL_LOCS.forEach(l=>{
-    const o = document.createElement('option');
-    o.value=l; o.textContent=l;
-    sel.appendChild(o);
-  });
+/* ========== UI ========== */
+function populateLocations(){locSelect.innerHTML="";ALL_LOCS.forEach(l=>{const o=document.createElement("option");o.value=l;o.textContent=l;locSelect.appendChild(o)})}
+function renderSuggestions(t){const b=suggest;b.innerHTML="";const term=norm(t);if(!term){b.style.display="none";return}
+  const taken=new Set(SELECTED_CATS.map(x=>x.type+":"+x.head+":"+x.value));
+  const hits=ALL_CATS.filter(c=>norm(c.label).includes(term)&&!taken.has(c.type+":"+c.head+":"+c.value)).slice(0,50);
+  if(!hits.length){b.style.display="none";return}
+  hits.forEach(h=>{const d=document.createElement("div");d.innerHTML=`<strong>${h.value}</strong> <span class="tag">(${h.type==="head"?"hoofdcategorie":"sub"} • ${h.head})</span>`;
+    d.onclick=()=>{SELECTED_CATS.push(h);catInput.value="";b.style.display="none";renderActiveCats();applyFilters()};b.appendChild(d)});
+  b.style.display="block";
 }
+function renderActiveCats(){activeCat.innerHTML="";SELECTED_CATS.forEach((c,i)=>{const chip=document.createElement("span");chip.className="chip";chip.innerHTML=`${c.value} <span class='x'>×</span>`;chip.querySelector(".x").onclick=()=>{SELECTED_CATS.splice(i,1);renderActiveCats();applyFilters()};activeCat.appendChild(chip)})}
 
-function renderSuggestions(term){
-  const box = els.suggest;
-  box.innerHTML="";
-  const t = norm(term);
-  if(!t){ box.style.display="none"; return; }
+/* ========== MATCHING ========== */
+function hasAnySubInHead(col,head){return col.categories.some(c=>TAX.subsByHead[head]?.some(s=>norm(s)===norm(c)))}
+function hasExactSub(col,sub){return col.categories.some(c=>norm(c)===norm(sub))}
+function matchesLocation(col,sel,free){let ok=false;if(sel.length){const set=new Set(col.locations.map(norm));ok=sel.some(v=>set.has(norm(v)))}if(!ok&&free){ok=col.locations.some(l=>norm(l).includes(norm(free)))}return ok}
+function scoreCol(col){let p=0,max=0,notes=[];for(const f of SELECTED_CATS){if(f.type==="sub"){max++;if(hasExactSub(col,f.value)){p++;notes.push({t:"good",txt:`Sub: ${f.value}`})}else if(hasAnySubInHead(col,f.head)){p+=0.6;notes.push({t:"warn",txt:`Wel ${f.head}, andere sub`})}else notes.push({t:"bad",txt:`Geen ${f.head}/${f.value}`})}
+  else if(f.type==="head"){max++;if(hasAnySubInHead(col,f.head)){p++;notes.push({t:"good",txt:`Hoofd: ${f.head}`})}else notes.push({t:"bad",txt:`Geen ${f.head}`})}}
+  const sel=[...locSelect.selectedOptions].map(o=>o.value),free=locFree.value;if(sel.length||free){max++;if(matchesLocation(col,sel,free)){p++;notes.push({t:"good",txt:"Locatie match"})}else notes.push({t:"warn",txt:"Locatie mist"})}
+  return{pct:max?Math.round(100*p/max):0,notes}}
+function applyFilters(){const res=DATA.map(d=>({...d,_score:scoreCol(d)})).sort((a,b)=>b._score.pct-a._score.pct);renderResults(res)}
+function renderResults(list){results.innerHTML="";count.textContent=list.length+" resultaten";list.forEach(r=>{const tr=document.createElement("tr");
+  tr.innerHTML=`<td><div class='name'>${r.name}</div></td><td>${r.locations.map(l=>`<span class='chip'>${l}</span>`).join(" ")}</td>
+  <td>${r.categories.map(c=>`<span class='chip'>${c}</span>`).join(" ")}</td>
+  <td><div class='kpi'><div style='min-width:46px;font-weight:600'>${r._score.pct}%</div>
+  <div class='meter' style='flex:1'><div class='bar' style='width:${r._score.pct}%'></div></div></div>
+  <div style='margin-top:6px'>${r._score.notes.map(n=>`<span class='badge ${n.t}'>${n.txt}</span>`).join(" ")}</div></td>`;results.appendChild(tr)})}
 
-  const taken = new Set(SELECTED_CATS.map(x=>x.type+":"+x.head+":"+x.value));
-  const hits = ALL_CATS.filter(c=>{
-    const hay = norm(c.label || c.value);
-    return hay.includes(t) && !taken.has(c.type+":"+c.head+":"+c.value);
-  }).slice(0,50);
-
-  if(hits.length===0){ box.style.display="none"; return; }
-
-  hits.forEach(h=>{
-    const row = document.createElement('div');
-    row.innerHTML = `<strong>${h.value}</strong> <span class="tag">(${h.type==='head'?'hoofdcategorie':'sub'} • ${h.head})</span>`;
-    row.addEventListener('click', ()=>{
-      SELECTED_CATS.push(h);
-      els.catInput.value="";
-      box.style.display="none";
-      renderActiveCats();
-      applyFilters();
-    });
-    box.appendChild(row);
-  });
-  box.style.display="block";
-}
-function renderActiveCats(){
-  const wrap = els.activeCat;
-  wrap.innerHTML="";
-  SELECTED_CATS.forEach((c,i)=>{
-    const chip = document.createElement('span');
-    chip.className="chip";
-    chip.innerHTML = `${c.value} <span class="x" title="verwijderen">×</span>`;
-    chip.querySelector('.x').addEventListener('click', ()=>{
-      SELECTED_CATS.splice(i,1);
-      renderActiveCats();
-      applyFilters();
-    });
-    wrap.appendChild(chip);
-  });
-}
-
-/* ===================== MATCHING ===================== */
-function hasAnySubInHead(colleague, head){
-  const subs = TAX.subsByHead[head]||[];
-  return colleague.categories.some(c => subs.some(s=>norm(s)===norm(c)));
-}
-function hasExactSub(colleague, sub){
-  return colleague.categories.some(c => norm(c)===norm(sub));
-}
-function matchesLocation(colleague, selected, free){
-  let ok = false;
-  if(selected.length){
-    const set = new Set(colleague.locations.map(x=>norm(x)));
-    ok = selected.some(v=>set.has(norm(v)));
-  }
-  if(!ok && free){
-    const t = norm(free);
-    ok = colleague.locations.some(l=>norm(l).includes(t));
-  }
-  return ok;
-}
-
-/* Scoring:
-   - Per gekozen categorie:
-       * sub: 1.0 als exact sub; 0.6 als andere sub binnenzelfde head; 0 anders
-       * head: 1.0 als collega ≥1 sub in die head heeft; 0 anders
-   - Locatie (als ingevuld): +1.0 bij match (vrij of selectie), 0 anders
-   - Match% = (behaalde / mogelijke) * 100
-*/
-function scoreColleague(colleague){
-  let points = 0, possible = 0;
-  const notes = [];
-
-  for(const f of SELECTED_CATS){
-    if(f.type==='sub'){
-      possible += 1;
-      if(hasExactSub(colleague, f.value)){
-        points += 1.0; notes.push({type:'good', txt:`Subcategorie: ${f.value}`});
-      }else if(hasAnySubInHead(colleague, f.head)){
-        points += 0.6; notes.push({type:'warn', txt:`Wel ${f.head}, andere sub`});
-      }else{
-        notes.push({type:'bad', txt:`Geen ${f.head}/${f.value}`});
-      }
-    }else if(f.type==='head'){
-      possible += 1;
-      if(hasAnySubInHead(colleague, f.head)){
-        points += 1.0; notes.push({type:'good', txt:`Hoofdcategorie: ${f.head}`});
-      }else{
-        notes.push({type:'bad', txt:`Geen ${f.head}`});
-      }
-    }
-  }
-
-  const selLocs = Array.from(els.locSelect.selectedOptions).map(o=>o.value);
-  const freeLoc = els.locFree.value.trim();
-  if(selLocs.length || freeLoc){
-    possible += 1;
-    if(matchesLocation(colleague, selLocs, freeLoc)){
-      points += 1.0; notes.push({type:'good', txt:`Locatie match`});
-    }else{
-      notes.push({type:'warn', txt:`Locatie mist`});
-    }
-  }
-
-  const pct = possible>0 ? Math.round((points/possible)*100) : 0;
-  return { pct, points, possible, notes };
-}
-
-/* ===================== RENDER ===================== */
-function renderResults(list){
-  els.results.innerHTML="";
-  els.count.textContent = `${list.length} resultaten`;
-  list.forEach(row=>{
-    const tr = document.createElement('tr');
-
-    const tdN = document.createElement('td');
-    tdN.innerHTML = `<div class="name">${row.name}</div>`;
-    tr.appendChild(tdN);
-
-    const tdL = document.createElement('td');
-    tdL.innerHTML = row.locations.map(l=>`<span class="chip">${l}</span>`).join(' ');
-    tr.appendChild(tdL);
-
-    const tdC = document.createElement('td');
-    tdC.innerHTML = row.categories.map(c=>`<span class="chip">${c}</span>`).join(' ');
-    tr.appendChild(tdC);
-
-    const tdM = document.createElement('td');
-    const meter = `
-      <div class="kpi">
-        <div style="min-width:46px;font-weight:600">${row._score.pct}%</div>
-        <div class="meter" style="flex:1">
-          <div class="bar" style="width:${row._score.pct}%"></div>
-        </div>
-      </div>
-      <div style="margin-top:6px">
-        ${row._score.notes.map(n=>`<span class="badge ${n.type}">${n.txt}</span>`).join(' ')}
-      </div>
-    `;
-    tdM.innerHTML = meter;
-    tr.appendChild(tdM);
-
-    els.results.appendChild(tr);
-  });
-}
-
-function applyFilters(){
-  const scored = DATA.map(d=>({ ...d, _score: scoreColleague(d) }))
-                     .sort((a,b)=> b._score.pct - a._score.pct);
-  renderResults(scored);
-}
-
-/* ===================== LOAD ALL ===================== */
-async function loadAll(){
-  try{
-    // Links uit defaults
-    const DATA_URL = DATA_URL_DEFAULT;
-    const TAX_URL  = TAX_URL_DEFAULT;
-
-    const [taxRows, dataRows] = await Promise.all([fetchCSV(TAX_URL), fetchCSV(DATA_URL)]);
-    buildTaxonomy(taxRows);
-    buildData(dataRows);
-    populateLocations();
-    applyFilters();
-  }catch(e){
-    console.error(e);
-    alert("Fout bij laden: " + e.message + "\nTip: test of je CSV-links publiek zijn (incognito) of zet USE_PROXY=true.");
-  }
-}
-
-/* ===================== EVENTS ===================== */
-document.getElementById('reset').addEventListener('click', ()=>{
-  els.locFree.value="";
-  Array.from(els.locSelect.options).forEach(o=>o.selected=false);
-  SELECTED_CATS.length=0;
-  renderActiveCats();
-  applyFilters();
-});
-els.catInput.addEventListener('input', e=>renderSuggestions(e.target.value));
-document.addEventListener('click', (e)=>{
-  if(!els.suggest.contains(e.target) && e.target!==els.catInput){
-    els.suggest.style.display="none";
-  }
-});
-els.locFree.addEventListener('input', applyFilters);
-els.locSelect.addEventListener('change', applyFilters);
-
-/* ===================== INIT ===================== */
+/* ========== LADEN ========== */
+async function loadAll(){try{const [tax,data]=await Promise.all([fetchCSV(TAX_URL_DEFAULT),fetchCSV(DATA_URL_DEFAULT)]);buildTaxonomy(tax);buildData(data);populateLocations();applyFilters()}catch(e){alert("Fout bij laden: "+e.message)}}
+reset.onclick=()=>{locFree.value="";Array.from(locSelect.options).forEach(o=>o.selected=false);SELECTED_CATS.length=0;renderActiveCats();applyFilters()};
+catInput.oninput=e=>renderSuggestions(e.target.value);
+document.onclick=e=>{if(!suggest.contains(e.target)&&e.target!==catInput)suggest.style.display="none"};
+locFree.oninput=applyFilters;locSelect.onchange=applyFilters;
+refresh.onclick=loadAll;
 loadAll();
-</script>
-</body>
-</html>
+
+/* ========== AUTO REFRESH ELKE 24 UUR ========== */
+const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000;
+setInterval(() => { console.log("Automatisch verversen van data…"); loadAll();
