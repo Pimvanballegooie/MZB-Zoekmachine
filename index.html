@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Monné Zoekmachine — Locatie & (Sub)Categorie met Match%</title>
+<title>Monné Zoekmachine — Hoofdcategorie → Subcategorie met Match%</title>
 <style>
   :root{
     --bg:#0b1020; --panel:#0f172a; --muted:#94a3b8; --text:#e5e7eb;
@@ -19,7 +19,7 @@
   .sub{color:var(--muted)}
   .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;margin:12px 0}
   .grid{display:grid;gap:12px}
-  @media(min-width:1000px){.grid-3{grid-template-columns:1fr 1fr 1fr}}
+  @media(min-width:1100px){.grid-3{grid-template-columns:1fr 1fr 1fr}}
   label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
   input[type="text"],select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:#0b1220;color:var(--text)}
   .btn{padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:#0b1220;color:var(--text);cursor:pointer}
@@ -27,15 +27,9 @@
   .btn-accent{background:var(--accent);border-color:#ef7d2a;color:#0b1020;font-weight:600}
   .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
   .chip{background:var(--chip);border:1px solid var(--chip-b);padding:6px 10px;border-radius:999px;font-size:12px}
-  .chip .x{margin-left:6px;cursor:pointer;opacity:.7}
   .row{display:flex;gap:10px;flex-wrap:wrap}
   .status{font-size:13px;color:var(--muted);margin:6px 0}
   .status.error{color:var(--bad)}
-  .typeahead{position:relative}
-  .suggest{position:absolute;z-index:20;top:100%;left:0;right:0;background:#0b1220;border:1px solid var(--border);border-radius:12px;max-height:260px;overflow:auto}
-  .suggest div{padding:8px 10px;border-bottom:1px solid #0e172b;cursor:pointer}
-  .suggest div:hover{background:#101a32}
-  .tag{font-size:11px;opacity:.8}
   table{width:100%;border-collapse:separate;border-spacing:0 10px;margin-top:12px}
   thead th{text-align:left;font-size:12px;color:var(--muted);padding:0 12px}
   tbody tr{background:#0b1220;border:1px solid var(--border)}
@@ -49,9 +43,6 @@
   .warn{border-color:#7c6a12;background:#2a240f;color:#fde68a}
   .bad{border-color:#7f1d1d;background:#2a1111;color:#fecaca}
   .muted{color:var(--muted)}
-  details.debug{font-size:12px;color:var(--muted)}
-  details.debug summary{cursor:pointer}
-  .kv{display:grid;grid-template-columns:auto 1fr;gap:6px}
 </style>
 </head>
 <body>
@@ -61,13 +52,10 @@
       <div class="logo"></div>
       <div>
         <h1>Monné Zoekmachine</h1>
-        <div class="sub">Locatie & (Sub)Categorie — Slim zoeken met match%</div>
+        <div class="sub">Eerst hoofdcategorie, daarna subcategorie — met match%</div>
       </div>
     </div>
-    <div class="row">
-      <button id="refresh" class="btn-accent">Vernieuw data</button>
-      <button id="toggleDebug" class="btn">Debug</button>
-    </div>
+    <button id="refresh" class="btn-accent">Vernieuw data</button>
   </header>
 
   <div id="statusBar" class="status"></div>
@@ -75,20 +63,22 @@
   <div class="panel">
     <div class="grid grid-3">
       <div>
+        <label>Hoofdcategorie</label>
+        <select id="headSelect"></select>
+      </div>
+      <div>
+        <label>Subcategorie(ën) binnen geselecteerde hoofd</label>
+        <select id="subSelect" size="8" multiple></select>
+        <div class="row" style="margin-top:8px">
+          <button id="subsAll" class="btn">Alles</button>
+          <button id="subsNone" class="btn">Niets</button>
+        </div>
+      </div>
+      <div>
         <label>Locatie (vrij zoeken)</label>
         <input id="locFree" type="text" placeholder="Typ bijv. 'Belcrum' of 'Ginneken'">
-      </div>
-      <div>
-        <label>Locatie (selectie)</label>
+        <label style="margin-top:10px">Locatie (selectie)</label>
         <select id="locSelect" size="6" multiple></select>
-      </div>
-      <div>
-        <label>Categorie-zoeker (intelligent: hoofd & sub)</label>
-        <div class="typeahead">
-          <input id="catInput" type="text" placeholder="Typ bijv. 'Kinder' of 'Benen' of 'Schouder'">
-          <div id="suggest" class="suggest" style="display:none;"></div>
-        </div>
-        <div class="chips" id="activeCat"></div>
       </div>
     </div>
     <div class="row" style="margin-top:8px">
@@ -108,26 +98,21 @@
       <tbody id="results"></tbody>
     </table>
   </div>
-
-  <details class="panel debug" id="debugPanel" style="display:none">
-    <summary>Debugdetails</summary>
-    <div class="kv" id="dbg"></div>
-  </details>
 </div>
 
 <script>
 /* ===================== CONFIG ===================== */
-/* Vervang hieronder met jouw (publieke) Forms/Sheet CSV als je wilt vastzetten */
+/* Forms/Sheet CSV (publish of export) */
 const DATA_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQzg4Lc0Ffm3lmtQNSJPa5oPX3BMI0CNvWlhYuqT7u5zrtOlsG4-7urOd51M0TUg7DTvg-CH6GPm4_Q/pub?gid=1507012908&single=true&output=csv";
 
-/* Probeer eerst direct, daarna proxies (om CORS of 403 te omzeilen) */
+/* Fallback fetchers: direct → proxy1 → proxy2 */
 const PROXIES = [
   (url) => url,
   (url) => "https://cors.isomorphic-git.org/" + url,
   (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
 ];
 
-/* “Hoofdtermen” die we uit kolomnamen halen (fuzzy) */
+/* Bekende hoofdcategorie tokens (mag je uitbreiden/aanpassen) */
 const HEAD_TOKENS = [
   "Kinder","Geriatrie","Psychosomatisch","CZ","Wervelkolom","Benen","Armen","Specifieke behandelingen"
 ];
@@ -157,8 +142,8 @@ function tokenizeLabel(s){
   const t = removeDiacritics(s).replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(Boolean);
   return t.map(w=>{
     if(w.length>4){
-      if(w.endsWith('en')) return w.slice(0,-2);   // heupen -> heup; bovenbenen -> bovenbeen
-      if(w.endsWith('s'))  return w.slice(0,-1);   // schouders -> schouder
+      if(w.endsWith('en')) return w.slice(0,-2); // heupen -> heup
+      if(w.endsWith('s'))  return w.slice(0,-1); // schouders -> schouder
     }
     return w;
   });
@@ -184,20 +169,18 @@ function isTruthy(v){
 }
 
 /* ===================== STATE ===================== */
-let DATA=[], ALL_LOCS=[], SELECTED_CATS=[], ALL_CATS=[], HEAD_MAP=new Map(), DEBUG={};
+let DATA=[], ALL_LOCS=[], HEADS=[], SUBS_BY_HEAD=new Map(), HEAD_OF_LABEL=new Map();
 const els = {
+  head:document.getElementById('headSelect'),
+  subs:document.getElementById('subSelect'),
+  subsAll:document.getElementById('subsAll'),
+  subsNone:document.getElementById('subsNone'),
   locFree:document.getElementById('locFree'),
   locSelect:document.getElementById('locSelect'),
-  catInput:document.getElementById('catInput'),
-  suggest:document.getElementById('suggest'),
-  activeCat:document.getElementById('activeCat'),
-  reset:document.getElementById('reset'),
   results:document.getElementById('results'),
   count:document.getElementById('count'),
+  reset:document.getElementById('reset'),
   refresh:document.getElementById('refresh'),
-  debugPanel:document.getElementById('debugPanel'),
-  dbg:document.getElementById('dbg'),
-  toggleDebug:document.getElementById('toggleDebug'),
 };
 
 /* ===================== FETCH ===================== */
@@ -221,13 +204,13 @@ async function fetchCSV(url){
   throw lastErr || new Error('Failed to fetch');
 }
 
-/* ===================== DATA inlezen (zonder taxonomie) ===================== */
+/* ===================== DATA INLEZEN (1 CSV) ===================== */
 function buildData(rows){
   if(!rows || !rows.length) throw new Error('Lege data CSV');
   const header = rows[0].map(h => String(h||''));
   const headerNorm = header.map(h=>removeDiacritics(h).replace(/\s+/g,' ').trim());
 
-  const findCol = (needles) => { for(let i=0;i<headerNorm.length;i++){ if(needles.some(n=>headerNorm[i].includes(n))) return i; } return -1; };
+  const findCol = (needles) => { for(let i=0;i<headerNorm.length;i++){ if(needles.some(n => headerNorm[i].includes(n))) return i; } return -1; };
 
   // robuuste herkenning naam/loc/spec
   const iName = findCol(['naam','naam collega','voor- en achternaam','voornaam','achternaam','collega','medewerker','naam?','naam van collega']);
@@ -239,7 +222,7 @@ function buildData(rows){
     throw new Error('Kon verplichte kolommen niet vinden (Naam en Locatie).');
   }
 
-  // alle overige kolommen => mogelijke categorie
+  // alle overige kolommen => potentiële categorie
   const skip = new Set([iName,iLoc,iSpec].filter(x=>x>=0));
   const categoryCols = [];
   for(let c=0;c<header.length;c++){
@@ -248,120 +231,114 @@ function buildData(rows){
     if(label) categoryCols.push({index:c,label});
   }
 
-  // bepaal per label welke hoofdterm(en) het waarschijnlijk is (Kinder/Benen/…)
-  HEAD_MAP = new Map();
+  // map sublabel → hoofden (op basis van HEAD_TOKENS)
+  HEADS = [...HEAD_TOKENS];
+  SUBS_BY_HEAD = new Map(HEADS.map(h=>[h,[]]));
+  HEAD_OF_LABEL = new Map();
+
   for(const col of categoryCols){
-    const heads = HEAD_TOKENS.filter(h => similarLabel(h, col.label));
-    HEAD_MAP.set(col.label, heads); // kan leeg of meerdere zijn
+    const heads = HEADS.filter(h => similarLabel(h, col.label));
+    if(heads.length===0 && similarLabel(col.label,'Specifieke behandelingen')){
+      heads.push('Specifieke behandelingen');
+    }
+    if(heads.length===0){
+      // als niets matcht, probeer grof te mappen op sleutelwoorden
+      if(similarLabel(col.label,'arm')) heads.push('Armen');
+      else if(similarLabel(col.label,'been')||similarLabel(col.label,'heup')) heads.push('Benen');
+      else if(similarLabel(col.label,'wervel')||similarLabel(col.label,'rug')||similarLabel(col.label,'nek')) heads.push('Wervelkolom');
+    }
+    if(heads.length===0){
+      // geen head → sla toch op als losse sub onder "Specifieke behandelingen"
+      heads.push('Specifieke behandelingen');
+    }
+    HEAD_OF_LABEL.set(col.label, heads);
+    heads.forEach(h=>{
+      if(!SUBS_BY_HEAD.has(h)) SUBS_BY_HEAD.set(h, []);
+      SUBS_BY_HEAD.get(h).push(col.label);
+    });
   }
 
   const out = [];
   const locsSet = new Set();
-  const allCategoryLabels = new Set();
   for(let r=1;r<rows.length;r++){
     const row = rows[r]; if(!row || row.length===0) continue;
     const name = (row[iName]||'').toString().trim(); if(!name) continue;
 
     const locations = splitLoc(row[iLoc]||''); locations.forEach(l=>locsSet.add(l));
 
-    const mains = [];
+    const cats = [];
     for(const col of categoryCols){
       const v = row[col.index];
-      if(isTruthy(v)){
-        mains.push(col.label);
-        allCategoryLabels.add(col.label);
-      }
+      if(isTruthy(v)) cats.push(col.label);
     }
-
-    // Specifieke behandelingen: neem losse termen mee als extra categorieën
-    const specs = [];
+    // Specifieke behandelingen los als sublabels
     if(iSpec >= 0){
       const raw=(row[iSpec]||'').toString().trim();
       if(raw){
         raw.split(',').forEach(p=>{
           const clean = cleanLabel(p);
-          if(clean){ specs.push(clean); allCategoryLabels.add(clean); }
+          if(clean && !cats.includes(clean)) cats.push(clean);
+          if(clean && !HEAD_OF_LABEL.has(clean)){
+            HEAD_OF_LABEL.set(clean, ['Specifieke behandelingen']);
+            const arr = SUBS_BY_HEAD.get('Specifieke behandelingen') || [];
+            if(!arr.includes(clean)) { arr.push(clean); SUBS_BY_HEAD.set('Specifieke behandelingen', arr); }
+          }
         });
       }
     }
-
-    const categories = Array.from(new Set([...mains, ...specs]));
-    out.push({ name, locations, categories });
+    out.push({ name, locations, categories: cats });
   }
 
   DATA = out;
   ALL_LOCS = Array.from(locsSet).sort((a,b)=>a.localeCompare(b));
-  ALL_CATS = Array.from(allCategoryLabels).sort((a,b)=>a.localeCompare(b));
 
-  DEBUG = {
-    rows: rows.length-1,
-    cols: header.length,
-    nameCol: iName, locCol: iLoc, specCol: iSpec,
-    categoryCols: categoryCols.map(c=>c.label),
-    headMapSample: Array.from(HEAD_MAP.entries()).slice(0,12).map(([k,v])=>`${k} -> ${v.join('/')}`)
-  };
+  // sorteer subs per head
+  for(const h of SUBS_BY_HEAD.keys()){
+    SUBS_BY_HEAD.set(h, Array.from(new Set(SUBS_BY_HEAD.get(h))).sort((a,b)=>a.localeCompare(b)));
+  }
 }
 
-/* ===================== TYPEAHEAD ===================== */
-function renderSuggestions(term){
-  const box = els.suggest; box.innerHTML="";
-  const t = norm(term); if(!t){ box.style.display="none"; return; }
-
-  // opties: 1) hoofdtermen (als match), 2) alle categorie-labels
-  const headHits = HEAD_TOKENS.filter(h => norm(h).includes(t));
-  const catHits  = ALL_CATS.filter(c => norm(c).includes(t)).slice(0,50);
-
-  const items = [
-    ...headHits.map(h=>({type:'head', value:h, label:`${h} (hoofdcategorie)`})),
-    ...catHits.map(c=>({type:'sub',  value:c, label:c}))
-  ];
-
-  if(items.length===0){ box.style.display="none"; return; }
-
-  items.forEach(it=>{
-    const row = document.createElement('div');
-    row.innerHTML = `<strong>${it.value}</strong> <span class="tag">${it.type==='head'?'hoofdcategorie':'sub'}</span>`;
-    row.addEventListener('click', ()=>{
-      SELECTED_CATS.push(it);
-      els.catInput.value="";
-      box.style.display="none";
-      renderActiveCats();
-      applyFilters();
-    });
-    box.appendChild(row);
+/* ===================== UI: Hoofd → Sub ===================== */
+function populateHeads(){
+  const el = els.head; el.innerHTML = "";
+  const heads = Array.from(SUBS_BY_HEAD.keys()).filter(h=> (SUBS_BY_HEAD.get(h)||[]).length>0);
+  heads.sort((a,b)=>a.localeCompare(b));
+  heads.forEach(h=>{
+    const o=document.createElement('option'); o.value=h; o.textContent=h; el.appendChild(o);
   });
-  box.style.display="block";
 }
-function renderActiveCats(){
-  const wrap = els.activeCat; wrap.innerHTML="";
-  SELECTED_CATS.forEach((c,i)=>{
-    const chip = document.createElement('span');
-    chip.className="chip";
-    chip.innerHTML = `${c.value} <span class="x" title="verwijderen">×</span>`;
-    chip.querySelector('.x').addEventListener('click', ()=>{
-      SELECTED_CATS.splice(i,1);
-      renderActiveCats();
-      applyFilters();
-    });
-    wrap.appendChild(chip);
+function populateSubs(){
+  const head = els.head.value;
+  const el = els.subs; el.innerHTML="";
+  const subs = SUBS_BY_HEAD.get(head)||[];
+  subs.forEach(s=>{
+    const o=document.createElement('option'); o.value=s; o.textContent=s; el.appendChild(o);
+  });
+}
+
+/* ===================== LOCATIES ===================== */
+function populateLocations(){
+  const sel = els.locSelect; sel.innerHTML = "";
+  ALL_LOCS.forEach(l=>{
+    const o = document.createElement('option'); o.value=l; o.textContent=l; sel.appendChild(o);
   });
 }
 
 /* ===================== MATCHING ===================== */
-function labelHasHead(label, head){
-  const heads = HEAD_MAP.get(label) || [];
-  return heads.some(h => h === head);
+function labelBelongsToHead(label, head){
+  const heads = HEAD_OF_LABEL.get(label) || [];
+  return heads.some(h => h===head || similarLabel(h, head));
 }
 function hasAnyLabelInHead(colleague, head){
-  return colleague.categories.some(lbl => labelHasHead(lbl, head));
+  return colleague.categories.some(lbl => labelBelongsToHead(lbl, head));
 }
 function hasExactLabel(colleague, label){
   return colleague.categories.some(lbl => similarLabel(lbl, label));
 }
 function matchesLocation(colleague, selected, free){
-  let ok = false;
+  let ok=false;
   if(selected.length){
-    const set = new Set(colleague.locations.map(x=>norm(x)));
+    const set=new Set(colleague.locations.map(x=>norm(x)));
     ok = selected.some(v=>set.has(norm(v)));
   }
   if(!ok && free){
@@ -372,36 +349,35 @@ function matchesLocation(colleague, selected, free){
 }
 
 /* Scoring:
-   - Gekozen sub-label: 1.0 als fuzzy exact; 0.6 als collega een ander label heeft dat bij dezelfde head hoort; 0 anders
-   - Gekozen head:      1.0 als collega ≥1 label heeft dat (fuzzy) aan die head is gekoppeld
+   - Als er subs zijn gekozen:
+       per sub 1.0 bij fuzzy exact; 0.6 bij andere sub binnen dezelfde head; 0 anders
+   - Als GEEN sub is gekozen maar WEL head: 1.0 als collega ≥1 sub in die head heeft; 0 anders
    - Locatie (indien ingevuld): +1.0 bij match
 */
 function scoreColleague(colleague){
-  let points = 0, possible = 0;
-  const notes = [];
+  let points=0, possible=0;
+  const notes=[];
 
-  for(const f of SELECTED_CATS){
-    if(f.type==='sub'){
+  const head = els.head.value;
+  const chosenSubs = Array.from(els.subs.selectedOptions).map(o=>o.value);
+
+  if(chosenSubs.length>0){
+    for(const sub of chosenSubs){
       possible += 1;
-      if(hasExactLabel(colleague, f.value)){
-        points += 1.0; notes.push({type:'good', txt:`Sub: ${f.value}`});
+      if(hasExactLabel(colleague, sub)){
+        points += 1.0; notes.push({type:'good',txt:`Sub: ${sub}`});
+      }else if(hasAnyLabelInHead(colleague, head)){
+        points += 0.6; notes.push({type:'warn',txt:`Wel ${head}, andere sub`});
       }else{
-        // zoek of de gekozen sub een head raakt, en of collega iets in die head heeft
-        const heads = HEAD_TOKENS.filter(h => similarLabel(h, f.value));
-        const okSameHead = heads.some(h => hasAnyLabelInHead(colleague, h));
-        if(okSameHead){
-          points += 0.6; notes.push({type:'warn', txt:`Wel ${heads[0]||'zelfde hoofd'}, andere sub`});
-        }else{
-          notes.push({type:'bad', txt:`Geen ${f.value}`});
-        }
+        notes.push({type:'bad',txt:`Geen ${head}/${sub}`});
       }
-    }else if(f.type==='head'){
-      possible += 1;
-      if(hasAnyLabelInHead(colleague, f.value)){
-        points += 1.0; notes.push({type:'good', txt:`Hoofd: ${f.value}`});
-      }else{
-        notes.push({type:'bad', txt:`Geen ${f.value}`});
-      }
+    }
+  }else if(head){
+    possible += 1;
+    if(hasAnyLabelInHead(colleague, head)){
+      points += 1.0; notes.push({type:'good',txt:`Hoofd: ${head}`});
+    }else{
+      notes.push({type:'bad',txt:`Geen ${head}`});
     }
   }
 
@@ -410,13 +386,13 @@ function scoreColleague(colleague){
   if(selLocs.length || freeLoc){
     possible += 1;
     if(matchesLocation(colleague, selLocs, freeLoc)){
-      points += 1.0; notes.push({type:'good', txt:`Locatie match`});
+      points += 1.0; notes.push({type:'good',txt:`Locatie match`});
     }else{
-      notes.push({type:'warn', txt:`Locatie mist`});
+      notes.push({type:'warn',txt:`Locatie mist`});
     }
   }
 
-  const pct = possible>0 ? Math.round((points/possible)*100) : 0;
+  const pct = possible>0 ? Math.round(100*points/possible) : 0;
   return { pct, notes };
 }
 
@@ -425,18 +401,18 @@ function renderResults(list){
   els.results.innerHTML="";
   els.count.textContent = `${list.length} resultaten`;
   list.forEach(r=>{
-    const tr = document.createElement('tr');
+    const tr=document.createElement('tr');
     tr.innerHTML = `
       <td><div class="name">${r.name}</div></td>
-      <td>${r.locations.map(l=>`<span class="chip">${l}</span>`).join(" ")}</td>
-      <td>${r.categories.map(c=>`<span class="chip">${c}</span>`).join(" ")}</td>
+      <td>${r.locations.map(l=>`<span class="chip">${l}</span>`).join(' ')}</td>
+      <td>${r.categories.map(c=>`<span class="chip">${c}</span>`).join(' ')}</td>
       <td>
         <div class="kpi">
           <div style="min-width:46px;font-weight:600">${r._score.pct}%</div>
           <div class="meter" style="flex:1"><div class="bar" style="width:${r._score.pct}%"></div></div>
         </div>
         <div style="margin-top:6px">
-          ${r._score.notes.map(n=>`<span class="badge ${n.type}">${n.txt}</span>`).join(" ")}
+          ${r._score.notes.map(n=>`<span class="badge ${n.type}">${n.txt}</span>`).join(' ')}
         </div>
       </td>`;
     els.results.appendChild(tr);
@@ -448,44 +424,16 @@ function applyFilters(){
   renderResults(res);
 }
 
-/* ===================== LOCATIES ===================== */
-function populateLocations(){
-  const sel = els.locSelect; sel.innerHTML = "";
-  ALL_LOCS.forEach(l=>{
-    const o = document.createElement('option');
-    o.value=l; o.textContent=l;
-    sel.appendChild(o);
-  });
-}
-
-/* ===================== DEBUG ===================== */
-function renderDebug(){
-  const D = els.dbg; D.innerHTML = "";
-  const rows = [
-    ["Aantal regels (data)", DEBUG.rows ?? "-"],
-    ["Aantal kolommen", DEBUG.cols ?? "-"],
-    ["Kolom Naam index", DEBUG.nameCol ?? "-"],
-    ["Kolom Locatie index", DEBUG.locCol ?? "-"],
-    ["Kolom SpecBeh index", DEBUG.specCol ?? "-"],
-    ["Categorie-kolommen (alle)", (DEBUG.categoryCols||[]).join(", ") || "-"],
-    ["Head-mapping (voorbeeld)", (DEBUG.headMapSample||[]).join(" | ") || "-"],
-  ];
-  rows.forEach(([k,v])=>{
-    const kEl = document.createElement('div'); kEl.textContent = k;
-    const vEl = document.createElement('div'); vEl.textContent = v;
-    D.appendChild(kEl); D.appendChild(vEl);
-  });
-}
-
-/* ===================== LADEN ===================== */
+/* ===================== INIT/LOAD ===================== */
 async function loadAll(){
   try{
     setStatus('Data laden…');
     const dataRows = await fetchCSV(DATA_URL_DEFAULT);
     buildData(dataRows);
+    populateHeads();
+    populateSubs();
     populateLocations();
     applyFilters();
-    renderDebug();
     setStatus('Data geladen.');
   }catch(e){
     setStatus('Fout bij laden: ' + (e.message||e), true);
@@ -493,31 +441,33 @@ async function loadAll(){
 }
 
 /* ===================== EVENTS ===================== */
-els.reset.addEventListener('click', ()=>{
-  els.locFree.value="";
-  Array.from(els.locSelect.options).forEach(o=>o.selected=false);
-  SELECTED_CATS.length=0;
-  els.activeCat.innerHTML="";
+els.head.addEventListener('change', ()=>{
+  populateSubs();
   applyFilters();
 });
-els.catInput.addEventListener('input', e=>renderSuggestions(e.target.value));
-document.addEventListener('click', (e)=>{
-  if(!els.suggest.contains(e.target) && e.target!==els.catInput){
-    els.suggest.style.display="none";
-  }
+els.subs.addEventListener('change', applyFilters);
+els.subsAll.addEventListener('click', ()=>{
+  Array.from(els.subs.options).forEach(o=>o.selected=true);
+  applyFilters();
+});
+els.subsNone.addEventListener('click', ()=>{
+  Array.from(els.subs.options).forEach(o=>o.selected=false);
+  applyFilters();
 });
 els.locFree.addEventListener('input', applyFilters);
 els.locSelect.addEventListener('change', applyFilters);
-els.refresh.addEventListener('click', loadAll);
-els.toggleDebug.addEventListener('click', ()=>{
-  const vis = els.debugPanel.style.display !== "none";
-  els.debugPanel.style.display = vis ? "none" : "block";
+els.reset.addEventListener('click', ()=>{
+  els.locFree.value="";
+  Array.from(els.locSelect.options).forEach(o=>o.selected=false);
+  Array.from(els.subs.options).forEach(o=>o.selected=false);
+  applyFilters();
 });
+els.refresh.addEventListener('click', loadAll);
 
-/* ===================== INIT + AUTO REFRESH ===================== */
+/* ===================== AUTO REFRESH ===================== */
 loadAll();
-const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24u
-setInterval(() => { loadAll(); }, AUTO_REFRESH_MS);
+const AUTO_REFRESH_MS = 24*60*60*1000;
+setInterval(()=>loadAll(), AUTO_REFRESH_MS);
 </script>
 </body>
 </html>
