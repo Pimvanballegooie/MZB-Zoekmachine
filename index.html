@@ -8,8 +8,7 @@
   :root{
     --bg:#0b1020; --panel:#0f172a; --muted:#94a3b8; --text:#e5e7eb;
     --border:#1f2937; --chip:#162039; --chip-b:#22314f;
-    --accent:#f97316;
-    --good:#22c55e; --warn:#eab308; --bad:#f43f5e;
+    --accent:#f97316; --good:#22c55e; --warn:#eab308; --bad:#f43f5e;
   }
   html,body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial}
   .container{max-width:1200px;margin:0 auto;padding:24px}
@@ -50,7 +49,6 @@
   .warn{border-color:#7c6a12;background:#2a240f;color:#fde68a}
   .bad{border-color:#7f1d1d;background:#2a1111;color:#fecaca}
   .muted{color:var(--muted)}
-  .footer{margin-top:16px;color:var(--muted);font-size:12px}
   details.debug{font-size:12px;color:var(--muted)}
   details.debug summary{cursor:pointer}
   .kv{display:grid;grid-template-columns:auto 1fr;gap:6px}
@@ -87,7 +85,7 @@
       <div>
         <label>Categorie-zoeker (intelligent: hoofd & sub)</label>
         <div class="typeahead">
-          <input id="catInput" type="text" placeholder="Typ bijv. 'Kinder' of 'Schouder'">
+          <input id="catInput" type="text" placeholder="Typ bijv. 'Kinder' of 'Benen' of 'Schouder'">
           <div id="suggest" class="suggest" style="display:none;"></div>
         </div>
         <div class="chips" id="activeCat"></div>
@@ -109,7 +107,6 @@
       </thead>
       <tbody id="results"></tbody>
     </table>
-    <div class="footer">Automatisch bijgewerkt; of klik op “Vernieuw data”.</div>
   </div>
 
   <details class="panel debug" id="debugPanel" style="display:none">
@@ -120,14 +117,19 @@
 
 <script>
 /* ===================== CONFIG ===================== */
+/* Vervang hieronder met jouw (publieke) Forms/Sheet CSV als je wilt vastzetten */
 const DATA_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQzg4Lc0Ffm3lmtQNSJPa5oPX3BMI0CNvWlhYuqT7u5zrtOlsG4-7urOd51M0TUg7DTvg-CH6GPm4_Q/pub?gid=1507012908&single=true&output=csv";
-const TAX_URL_DEFAULT  = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQAKYnsb6ueKbE3RDv9K7rOztmmdZ9KheaEGM_-UUnrln5PAU-k8AeKFmZt16eUF0HfvNGfYMlX8tsH/pub?gid=0&single=true&output=csv";
 
-/* Probeer eerst direct, daarna twee proxies */
+/* Probeer eerst direct, daarna proxies (om CORS of 403 te omzeilen) */
 const PROXIES = [
   (url) => url,
   (url) => "https://cors.isomorphic-git.org/" + url,
   (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+];
+
+/* “Hoofdtermen” die we uit kolomnamen halen (fuzzy) */
+const HEAD_TOKENS = [
+  "Kinder","Geriatrie","Psychosomatisch","CZ","Wervelkolom","Benen","Armen","Specifieke behandelingen"
 ];
 
 /* ===================== HELPERS ===================== */
@@ -150,32 +152,22 @@ function parseCSV(text){
   return rows;
 }
 function norm(s){ return String(s||'').trim().toLowerCase(); }
-function removeDiacritics(s){
-  return norm(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-}
+function removeDiacritics(s){ return norm(s).normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
 function tokenizeLabel(s){
-  // maakt tokens, verwijdert leestekens, simpele enkelvoudsreductie
   const t = removeDiacritics(s).replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(Boolean);
   return t.map(w=>{
     if(w.length>4){
-      if(w.endsWith('en')) return w.slice(0,-2);      // heupen → heup, bovenbenen → bovenbeen
-      if(w.endsWith('s'))  return w.slice(0,-1);      // schouders → schouder
+      if(w.endsWith('en')) return w.slice(0,-2);   // heupen -> heup; bovenbenen -> bovenbeen
+      if(w.endsWith('s'))  return w.slice(0,-1);   // schouders -> schouder
     }
     return w;
   });
 }
-function jaccard(a,b){
-  const A = new Set(a), B = new Set(b);
-  const inter = [...A].filter(x=>B.has(x)).length;
-  const uni = new Set([...A,...B]).size || 1;
-  return inter/uni;
-}
+function jaccard(a,b){ const A=new Set(a),B=new Set(b); const inter=[...A].filter(x=>B.has(x)).length; const uni=new Set([...A,...B]).size||1; return inter/uni; }
 function similarLabel(a,b){
-  // fuzzy vergelijker: token Jaccard + substring fallback
-  const ta = tokenizeLabel(a), tb = tokenizeLabel(b);
-  const jac = jaccard(ta,tb);
-  if(jac >= 0.6) return true;
-  const sa = removeDiacritics(a), sb = removeDiacritics(b);
+  const ta=tokenizeLabel(a), tb=tokenizeLabel(b);
+  if(jaccard(ta,tb) >= 0.6) return true;
+  const sa=removeDiacritics(a), sb=removeDiacritics(b);
   return sa.includes(sb) || sb.includes(sa);
 }
 function cleanLabel(s){ return tokenizeLabel(s).map(w=>w[0].toUpperCase()+w.slice(1)).join(' '); }
@@ -188,13 +180,11 @@ function isTruthy(v){
   const s = norm(v);
   if(!s) return false;
   if(['0','nee','false','nvt','-'].includes(s)) return false;
-  // ja/x/1/checked/tekst → waar
-  return true;
+  return true; // ja/x/1/checked/tekst → waar
 }
 
 /* ===================== STATE ===================== */
-let TAX={heads:[],subsByHead:{}}, DATA=[], ALL_LOCS=[], ALL_CATS=[], SELECTED_CATS=[];
-let DEBUG={};
+let DATA=[], ALL_LOCS=[], SELECTED_CATS=[], ALL_CATS=[], HEAD_MAP=new Map(), DEBUG={};
 const els = {
   locFree:document.getElementById('locFree'),
   locSelect:document.getElementById('locSelect'),
@@ -231,45 +221,15 @@ async function fetchCSV(url){
   throw lastErr || new Error('Failed to fetch');
 }
 
-/* ===================== TAXONOMIE ===================== */
-function buildTaxonomy(rows){
-  if(!rows || !rows.length) throw new Error('Lege taxonomie CSV');
-  const heads = rows[0].map(cleanLabel).filter(Boolean);
-  const subsByHead = {};
-  heads.forEach(h=>subsByHead[h]=[]);
-  for(let r=1;r<rows.length;r++){
-    const row = rows[r] || [];
-    for(let c=0;c<heads.length;c++){
-      const sub = cleanLabel(row[c]||"");
-      if(sub) subsByHead[heads[c]].push(sub);
-    }
-  }
-  TAX = { heads, subsByHead };
-  const cats = [];
-  heads.forEach(h=>{
-    cats.push({type:'head', head:h, value:h, label:h});
-    (subsByHead[h]||[]).forEach(s=>{
-      cats.push({type:'sub', head:h, value:s, label:`${s} · ${h}`});
-    });
-  });
-  ALL_CATS = cats;
-  DEBUG.taxHeads = heads;
-}
-
-/* ===================== DATA (dynamisch + fuzzy) ===================== */
+/* ===================== DATA inlezen (zonder taxonomie) ===================== */
 function buildData(rows){
   if(!rows || !rows.length) throw new Error('Lege data CSV');
   const header = rows[0].map(h => String(h||''));
   const headerNorm = header.map(h=>removeDiacritics(h).replace(/\s+/g,' ').trim());
 
-  const findCol = (needles) => {
-    for(let i=0;i<headerNorm.length;i++){
-      if(needles.some(n => headerNorm[i].includes(n))) return i;
-    }
-    return -1;
-  };
+  const findCol = (needles) => { for(let i=0;i<headerNorm.length;i++){ if(needles.some(n=>headerNorm[i].includes(n))) return i; } return -1; };
 
-  // robuuste herkenning
+  // robuuste herkenning naam/loc/spec
   const iName = findCol(['naam','naam collega','voor- en achternaam','voornaam','achternaam','collega','medewerker','naam?','naam van collega']);
   const iLoc  = findCol(['locatie','locaties','locatie(s)','op welke locatie','werk je','werkzaam','standplaats','vestiging','waar werk je','op welke locaties']);
   const iSpec = findCol(['specifieke behandelingen','spec beh','specbeh','specifieke','behandelingen (specbeh)','spec-beh','spec behandelingen']);
@@ -279,47 +239,48 @@ function buildData(rows){
     throw new Error('Kon verplichte kolommen niet vinden (Naam en Locatie).');
   }
 
-  // neem ALLE overige kolommen als categorie-kanshebber
+  // alle overige kolommen => mogelijke categorie
   const skip = new Set([iName,iLoc,iSpec].filter(x=>x>=0));
-  const categoryColumns = [];
+  const categoryCols = [];
   for(let c=0;c<header.length;c++){
     if(skip.has(c)) continue;
     const label = cleanLabel(header[c]);
-    if(label) categoryColumns.push({index:c,label});
+    if(label) categoryCols.push({index:c,label});
+  }
+
+  // bepaal per label welke hoofdterm(en) het waarschijnlijk is (Kinder/Benen/…)
+  HEAD_MAP = new Map();
+  for(const col of categoryCols){
+    const heads = HEAD_TOKENS.filter(h => similarLabel(h, col.label));
+    HEAD_MAP.set(col.label, heads); // kan leeg of meerdere zijn
   }
 
   const out = [];
   const locsSet = new Set();
-  let checkedColumns = new Set();
-
+  const allCategoryLabels = new Set();
   for(let r=1;r<rows.length;r++){
-    const row = rows[r];
-    if(!row || row.length===0) continue;
+    const row = rows[r]; if(!row || row.length===0) continue;
+    const name = (row[iName]||'').toString().trim(); if(!name) continue;
 
-    const name = (row[iName]||'').toString().trim();
-    if(!name) continue;
+    const locations = splitLoc(row[iLoc]||''); locations.forEach(l=>locsSet.add(l));
 
-    const locations = splitLoc(row[iLoc]||'');
-    locations.forEach(l=>locsSet.add(l));
-
-    // Booleans/tekst uit alle categorie-kolommen
     const mains = [];
-    for(const col of categoryColumns){
+    for(const col of categoryCols){
       const v = row[col.index];
       if(isTruthy(v)){
         mains.push(col.label);
-        checkedColumns.add(col.label);
+        allCategoryLabels.add(col.label);
       }
     }
 
-    // Vrije tekst uit Specifieke behandelingen (optioneel)
+    // Specifieke behandelingen: neem losse termen mee als extra categorieën
     const specs = [];
     if(iSpec >= 0){
       const raw=(row[iSpec]||'').toString().trim();
       if(raw){
         raw.split(',').forEach(p=>{
           const clean = cleanLabel(p);
-          if(clean) specs.push(clean);
+          if(clean){ specs.push(clean); allCategoryLabels.add(clean); }
         });
       }
     }
@@ -330,44 +291,38 @@ function buildData(rows){
 
   DATA = out;
   ALL_LOCS = Array.from(locsSet).sort((a,b)=>a.localeCompare(b));
-  DEBUG.rows = rows.length-1;
-  DEBUG.cols = header.length;
-  DEBUG.nameCol = iName;
-  DEBUG.locCol  = iLoc;
-  DEBUG.specCol = iSpec;
-  DEBUG.categoryCols = categoryColumns.map(c=>c.label);
-  DEBUG.checkedCols  = Array.from(checkedColumns);
+  ALL_CATS = Array.from(allCategoryLabels).sort((a,b)=>a.localeCompare(b));
+
+  DEBUG = {
+    rows: rows.length-1,
+    cols: header.length,
+    nameCol: iName, locCol: iLoc, specCol: iSpec,
+    categoryCols: categoryCols.map(c=>c.label),
+    headMapSample: Array.from(HEAD_MAP.entries()).slice(0,12).map(([k,v])=>`${k} -> ${v.join('/')}`)
+  };
 }
 
-/* ===================== UI ===================== */
-function populateLocations(){
-  const sel = els.locSelect;
-  sel.innerHTML = "";
-  ALL_LOCS.forEach(l=>{
-    const o = document.createElement('option');
-    o.value=l; o.textContent=l;
-    sel.appendChild(o);
-  });
-}
+/* ===================== TYPEAHEAD ===================== */
 function renderSuggestions(term){
-  const box = els.suggest;
-  box.innerHTML="";
-  const t = norm(term);
-  if(!t){ box.style.display="none"; return; }
+  const box = els.suggest; box.innerHTML="";
+  const t = norm(term); if(!t){ box.style.display="none"; return; }
 
-  const taken = new Set(SELECTED_CATS.map(x=>x.type+":"+x.head+":"+x.value));
-  const hits = ALL_CATS.filter(c=>{
-    const hay = norm(removeDiacritics(c.label || c.value));
-    return hay.includes(t) && !taken.has(c.type+":"+c.head+":"+c.value);
-  }).slice(0,50);
+  // opties: 1) hoofdtermen (als match), 2) alle categorie-labels
+  const headHits = HEAD_TOKENS.filter(h => norm(h).includes(t));
+  const catHits  = ALL_CATS.filter(c => norm(c).includes(t)).slice(0,50);
 
-  if(hits.length===0){ box.style.display="none"; return; }
+  const items = [
+    ...headHits.map(h=>({type:'head', value:h, label:`${h} (hoofdcategorie)`})),
+    ...catHits.map(c=>({type:'sub',  value:c, label:c}))
+  ];
 
-  hits.forEach(h=>{
+  if(items.length===0){ box.style.display="none"; return; }
+
+  items.forEach(it=>{
     const row = document.createElement('div');
-    row.innerHTML = `<strong>${h.value}</strong> <span class="tag">(${h.type==='head'?'hoofdcategorie':'sub'} • ${h.head})</span>`;
+    row.innerHTML = `<strong>${it.value}</strong> <span class="tag">${it.type==='head'?'hoofdcategorie':'sub'}</span>`;
     row.addEventListener('click', ()=>{
-      SELECTED_CATS.push(h);
+      SELECTED_CATS.push(it);
       els.catInput.value="";
       box.style.display="none";
       renderActiveCats();
@@ -378,8 +333,7 @@ function renderSuggestions(term){
   box.style.display="block";
 }
 function renderActiveCats(){
-  const wrap = els.activeCat;
-  wrap.innerHTML="";
+  const wrap = els.activeCat; wrap.innerHTML="";
   SELECTED_CATS.forEach((c,i)=>{
     const chip = document.createElement('span');
     chip.className="chip";
@@ -393,13 +347,16 @@ function renderActiveCats(){
   });
 }
 
-/* ===================== MATCHING (fuzzy) ===================== */
-function hasAnySubInHead(colleague, head){
-  const subs = TAX.subsByHead[head]||[];
-  return colleague.categories.some(c => subs.some(s=>similarLabel(s, c)));
+/* ===================== MATCHING ===================== */
+function labelHasHead(label, head){
+  const heads = HEAD_MAP.get(label) || [];
+  return heads.some(h => h === head);
 }
-function hasExactSub(colleague, sub){
-  return colleague.categories.some(c => similarLabel(c, sub));
+function hasAnyLabelInHead(colleague, head){
+  return colleague.categories.some(lbl => labelHasHead(lbl, head));
+}
+function hasExactLabel(colleague, label){
+  return colleague.categories.some(lbl => similarLabel(lbl, label));
 }
 function matchesLocation(colleague, selected, free){
   let ok = false;
@@ -415,9 +372,9 @@ function matchesLocation(colleague, selected, free){
 }
 
 /* Scoring:
-   - sub: 1.0 als fuzzy exact sub; 0.6 als andere sub binnenzelfde head; 0 anders
-   - head: 1.0 als collega ≥1 sub (fuzzy) in die head heeft; 0 anders
-   - locatie (indien ingevuld): +1.0 bij match
+   - Gekozen sub-label: 1.0 als fuzzy exact; 0.6 als collega een ander label heeft dat bij dezelfde head hoort; 0 anders
+   - Gekozen head:      1.0 als collega ≥1 label heeft dat (fuzzy) aan die head is gekoppeld
+   - Locatie (indien ingevuld): +1.0 bij match
 */
 function scoreColleague(colleague){
   let points = 0, possible = 0;
@@ -426,19 +383,24 @@ function scoreColleague(colleague){
   for(const f of SELECTED_CATS){
     if(f.type==='sub'){
       possible += 1;
-      if(hasExactSub(colleague, f.value)){
+      if(hasExactLabel(colleague, f.value)){
         points += 1.0; notes.push({type:'good', txt:`Sub: ${f.value}`});
-      }else if(hasAnySubInHead(colleague, f.head)){
-        points += 0.6; notes.push({type:'warn', txt:`Wel ${f.head}, andere sub`});
       }else{
-        notes.push({type:'bad', txt:`Geen ${f.head}/${f.value}`});
+        // zoek of de gekozen sub een head raakt, en of collega iets in die head heeft
+        const heads = HEAD_TOKENS.filter(h => similarLabel(h, f.value));
+        const okSameHead = heads.some(h => hasAnyLabelInHead(colleague, h));
+        if(okSameHead){
+          points += 0.6; notes.push({type:'warn', txt:`Wel ${heads[0]||'zelfde hoofd'}, andere sub`});
+        }else{
+          notes.push({type:'bad', txt:`Geen ${f.value}`});
+        }
       }
     }else if(f.type==='head'){
       possible += 1;
-      if(hasAnySubInHead(colleague, f.head)){
-        points += 1.0; notes.push({type:'good', txt:`Hoofd: ${f.head}`});
+      if(hasAnyLabelInHead(colleague, f.value)){
+        points += 1.0; notes.push({type:'good', txt:`Hoofd: ${f.value}`});
       }else{
-        notes.push({type:'bad', txt:`Geen ${f.head}`});
+        notes.push({type:'bad', txt:`Geen ${f.value}`});
       }
     }
   }
@@ -486,19 +448,27 @@ function applyFilters(){
   renderResults(res);
 }
 
+/* ===================== LOCATIES ===================== */
+function populateLocations(){
+  const sel = els.locSelect; sel.innerHTML = "";
+  ALL_LOCS.forEach(l=>{
+    const o = document.createElement('option');
+    o.value=l; o.textContent=l;
+    sel.appendChild(o);
+  });
+}
+
 /* ===================== DEBUG ===================== */
 function renderDebug(){
-  const D = els.dbg;
-  D.innerHTML = "";
+  const D = els.dbg; D.innerHTML = "";
   const rows = [
-    ["Taxonomie hoofdcategorieën", (DEBUG.taxHeads||[]).join(", ") || "-"],
     ["Aantal regels (data)", DEBUG.rows ?? "-"],
-    ["Aantal kolommen (data)", DEBUG.cols ?? "-"],
+    ["Aantal kolommen", DEBUG.cols ?? "-"],
     ["Kolom Naam index", DEBUG.nameCol ?? "-"],
     ["Kolom Locatie index", DEBUG.locCol ?? "-"],
     ["Kolom SpecBeh index", DEBUG.specCol ?? "-"],
     ["Categorie-kolommen (alle)", (DEBUG.categoryCols||[]).join(", ") || "-"],
-    ["Categorie-kolommen met waarden", (DEBUG.checkedCols||[]).join(", ") || "-"],
+    ["Head-mapping (voorbeeld)", (DEBUG.headMapSample||[]).join(" | ") || "-"],
   ];
   rows.forEach(([k,v])=>{
     const kEl = document.createElement('div'); kEl.textContent = k;
@@ -511,8 +481,7 @@ function renderDebug(){
 async function loadAll(){
   try{
     setStatus('Data laden…');
-    const [taxRows, dataRows] = await Promise.all([fetchCSV(TAX_URL_DEFAULT), fetchCSV(DATA_URL_DEFAULT)]);
-    buildTaxonomy(taxRows);
+    const dataRows = await fetchCSV(DATA_URL_DEFAULT);
     buildData(dataRows);
     populateLocations();
     applyFilters();
@@ -547,7 +516,7 @@ els.toggleDebug.addEventListener('click', ()=>{
 
 /* ===================== INIT + AUTO REFRESH ===================== */
 loadAll();
-const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000;
+const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24u
 setInterval(() => { loadAll(); }, AUTO_REFRESH_MS);
 </script>
 </body>
