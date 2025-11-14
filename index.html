@@ -1,473 +1,357 @@
-<!doctype html>
-<html lang="nl">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Monné Zoekmachine — Hoofdcategorie → Subcategorie met Match%</title>
-<style>
-  :root{
-    --bg:#0b1020; --panel:#0f172a; --muted:#94a3b8; --text:#e5e7eb;
-    --border:#1f2937; --chip:#162039; --chip-b:#22314f;
-    --accent:#f97316; --good:#22c55e; --warn:#eab308; --bad:#f43f5e;
-  }
-  html,body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial}
-  .container{max-width:1200px;margin:0 auto;padding:24px}
-  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-  h1{margin:0;font-size:clamp(18px,2.3vw,28px)}
-  .brand{display:flex;gap:10px;align-items:center}
-  .logo{width:36px;height:36px;border-radius:8px;background:var(--accent)}
-  .sub{color:var(--muted)}
-  .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;margin:12px 0}
-  .grid{display:grid;gap:12px}
-  @media(min-width:1100px){.grid-3{grid-template-columns:1fr 1fr 1fr}}
-  label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
-  input[type="text"],select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:#0b1220;color:var(--text)}
-  .btn{padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:#0b1220;color:var(--text);cursor:pointer}
-  .btn:hover{border-color:#2a3b5f}
-  .btn-accent{background:var(--accent);border-color:#ef7d2a;color:#0b1020;font-weight:600}
-  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-  .chip{background:var(--chip);border:1px solid var(--chip-b);padding:6px 10px;border-radius:999px;font-size:12px}
-  .row{display:flex;gap:10px;flex-wrap:wrap}
-  .status{font-size:13px;color:var(--muted);margin:6px 0}
-  .status.error{color:var(--bad)}
-  table{width:100%;border-collapse:separate;border-spacing:0 10px;margin-top:12px}
-  thead th{text-align:left;font-size:12px;color:var(--muted);padding:0 12px}
-  tbody tr{background:#0b1220;border:1px solid var(--border)}
-  td{padding:12px;vertical-align:top}
-  .name{font-weight:600}
-  .meter{height:10px;background:#0e162b;border-radius:999px;overflow:hidden;border:1px solid var(--border)}
-  .bar{height:100%;background:linear-gradient(90deg,var(--accent),#f59e0b)}
-  .kpi{display:flex;gap:10px;align-items:center}
-  .badge{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid var(--chip-b);background:var(--chip);font-size:11px;margin-right:6px}
-  .good{border-color:#1b7f3d;background:#0f2a1c;color:#a7f3d0}
-  .warn{border-color:#7c6a12;background:#2a240f;color:#fde68a}
-  .bad{border-color:#7f1d1d;background:#2a1111;color:#fecaca}
-  .muted{color:var(--muted)}
-</style>
-</head>
-<body>
-<div class="container">
-  <header>
-    <div class="brand">
-      <div class="logo"></div>
-      <div>
-        <h1>Monné Zoekmachine</h1>
-        <div class="sub">Eerst hoofdcategorie, daarna subcategorie — met match%</div>
-      </div>
-    </div>
-    <button id="refresh" class="btn-accent">Vernieuw data</button>
-  </header>
-
-  <div id="statusBar" class="status"></div>
-
-  <div class="panel">
-    <div class="grid grid-3">
-      <div>
-        <label>Hoofdcategorie</label>
-        <select id="headSelect"></select>
-      </div>
-      <div>
-        <label>Subcategorie(ën) binnen geselecteerde hoofd</label>
-        <select id="subSelect" size="8" multiple></select>
-        <div class="row" style="margin-top:8px">
-          <button id="subsAll" class="btn">Alles</button>
-          <button id="subsNone" class="btn">Niets</button>
-        </div>
-      </div>
-      <div>
-        <label>Locatie (vrij zoeken)</label>
-        <input id="locFree" type="text" placeholder="Typ bijv. 'Belcrum' of 'Ginneken'">
-        <label style="margin-top:10px">Locatie (selectie)</label>
-        <select id="locSelect" size="6" multiple></select>
-      </div>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button id="reset" class="btn">Wis filters</button>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="row" style="justify-content:space-between">
-      <div class="muted" id="count">0 resultaten</div>
-      <div class="muted">Sorteer op: Match% (hoog → laag)</div>
-    </div>
-    <table>
-      <thead>
-        <tr><th>Naam</th><th>Locaties</th><th>Categorieën</th><th style="width:260px">Match</th></tr>
-      </thead>
-      <tbody id="results"></tbody>
-    </table>
-  </div>
-</div>
-
 <script>
-/* ===================== CONFIG ===================== */
-/* Forms/Sheet CSV (publish of export) */
-const DATA_URL_DEFAULT = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQzg4Lc0Ffm3lmtQNSJPa5oPX3BMI0CNvWlhYuqT7u5zrtOlsG4-7urOd51M0TUg7DTvg-CH6GPm4_Q/pub?gid=1507012908&single=true&output=csv";
+// ===== CONFIG: KOLOMNAMEN (exact zoals in je sheet) =====
+const NAME_KEY = "Wat is je voor- en achternaam?";
+const LOC_KEY  = "Op welke locatie(s) werk je? Let op: meerdere locaties mogelijk";
 
-/* Fallback fetchers: direct → proxy1 → proxy2 */
-const PROXIES = [
-  (url) => url,
-  (url) => "https://cors.isomorphic-git.org/" + url,
-  (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+const HEAD_KEYS = [
+  "Kinder (KI)",
+  "Geriatrie (GE)",
+  "Psychosomatisch (PS)",
+  "CZ (Chronische Zorg)",
+  "Wervelkolom (WK)",
+  "Benen (BE)",
+  "Armen (AR)"
 ];
 
-/* Bekende hoofdcategorie tokens (mag je uitbreiden/aanpassen) */
-const HEAD_TOKENS = [
-  "Kinder","Geriatrie","Psychosomatisch","CZ","Wervelkolom","Benen","Armen","Specifieke behandelingen"
-];
+const SPEC_KEY = "Specifieke behandelingen (SpecBeh)";
 
-/* ===================== HELPERS ===================== */
-function setStatus(msg, isError=false){
-  const el = document.getElementById('statusBar');
-  el.textContent = msg;
-  el.className = isError ? 'status error' : 'status';
+// ========= JOUW OPENSHEET-LINK IS HIÉR INGEBOUWD ==========
+const DEFAULT_OPENSHEET_URL =
+  "https://opensheet.elk.sh/1Lixz4zd1EfYyRpqMB-5rN5yptCWJ2hxHboDiMulot10/1507012908";
+// ===========================================================
+
+// STATE
+let RAW_ROWS = [];
+let RECORDS = [];
+let ALL_LOCATIONS = [];
+let ALL_SUBS = [];
+let HEAD_META = [];
+
+// Elements
+const statusEl       = document.getElementById("status");
+const locQueryInput  = document.getElementById("locQuery");
+const locList        = document.getElementById("locList");
+const subQueryInput  = document.getElementById("subQuery");
+const nameQueryInput = document.getElementById("nameQuery");
+const headChipsWrap  = document.getElementById("headChips");
+const subChipsWrap   = document.getElementById("subChips");
+const hideZeroCb     = document.getElementById("hideZero");
+const activeFiltersEl= document.getElementById("activeFilters");
+const resultCountEl  = document.getElementById("resultCount");
+const resultsBody    = document.getElementById("resultsBody");
+const clearFiltersBtn= document.getElementById("clearFilters");
+const exportBtn      = document.getElementById("exportBtn");
+
+// Helper
+function setStatus(msg, warn=false){
+  statusEl.textContent = msg || "";
+  statusEl.className = "status " + (warn ? "warn" : "muted");
 }
-function parseCSV(text){
-  const rows=[]; let row=[], field='', i=0, q=false;
-  while(i<text.length){
-    const c=text[i];
-    if(q){ if(c==='\"'){ if(text[i+1]==='\"'){ field+='\"'; i++; } else { q=false; } } else { field+=c; } }
-    else { if(c==='\"'){ q=true; } else if(c===','){ row.push(field); field=''; }
-           else if(c==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
-           else if(c!=='\r'){ field+=c; } }
-    i++;
-  }
-  if(field.length||q||row.length){ row.push(field); rows.push(row); }
-  return rows;
+
+function norm(s){
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/\s+/g," ")
+    .trim();
 }
-function norm(s){ return String(s||'').trim().toLowerCase(); }
-function removeDiacritics(s){ return norm(s).normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
-function tokenizeLabel(s){
-  const t = removeDiacritics(s).replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(Boolean);
-  return t.map(w=>{
-    if(w.length>4){
-      if(w.endsWith('en')) return w.slice(0,-2); // heupen -> heup
-      if(w.endsWith('s'))  return w.slice(0,-1); // schouders -> schouder
-    }
-    return w;
-  });
-}
-function jaccard(a,b){ const A=new Set(a),B=new Set(b); const inter=[...A].filter(x=>B.has(x)).length; const uni=new Set([...A,...B]).size||1; return inter/uni; }
-function similarLabel(a,b){
-  const ta=tokenizeLabel(a), tb=tokenizeLabel(b);
-  if(jaccard(ta,tb) >= 0.6) return true;
-  const sa=removeDiacritics(a), sb=removeDiacritics(b);
-  return sa.includes(sb) || sb.includes(sa);
-}
-function cleanLabel(s){ return tokenizeLabel(s).map(w=>w[0].toUpperCase()+w.slice(1)).join(' '); }
-function splitLoc(v){
-  const raw=String(v||'').trim();
+
+function splitLocations(v){
+  const raw = String(v||"").trim();
   if(!raw) return [];
-  return raw.split(/[,;/]| en /i).map(x=>x.trim()).filter(Boolean);
+  return raw.split(/,|\/|;| en /i).map(s=>s.trim()).filter(Boolean);
 }
-function isTruthy(v){
-  const s = norm(v);
-  if(!s) return false;
-  if(['0','nee','false','nvt','-'].includes(s)) return false;
-  return true; // ja/x/1/checked/tekst → waar
-}
-
-/* ===================== STATE ===================== */
-let DATA=[], ALL_LOCS=[], HEADS=[], SUBS_BY_HEAD=new Map(), HEAD_OF_LABEL=new Map();
-const els = {
-  head:document.getElementById('headSelect'),
-  subs:document.getElementById('subSelect'),
-  subsAll:document.getElementById('subsAll'),
-  subsNone:document.getElementById('subsNone'),
-  locFree:document.getElementById('locFree'),
-  locSelect:document.getElementById('locSelect'),
-  results:document.getElementById('results'),
-  count:document.getElementById('count'),
-  reset:document.getElementById('reset'),
-  refresh:document.getElementById('refresh'),
-};
-
-/* ===================== FETCH ===================== */
-async function fetchCSV(url){
-  let lastErr;
-  for(const wrap of PROXIES){
-    const u = wrap(url);
-    try{
-      setStatus(`Laden: ${u}`);
-      const res = await fetch(u, { cache: 'no-store' });
-      if(!res.ok) throw new Error(`HTTP ${res.status}`);
-      const txt = await res.text();
-      setStatus(`Geladen: ${u}`);
-      return parseCSV(txt);
-    }catch(e){
-      lastErr = e;
-      console.warn('Fetch poging faalde:', u, e);
-    }
-  }
-  setStatus(`Fout bij laden: ${lastErr?.message || lastErr}`, true);
-  throw lastErr || new Error('Failed to fetch');
+function splitSubs(v){
+  const raw = String(v||"").trim();
+  if(!raw) return [];
+  return raw.split(",").map(s=>s.trim()).filter(Boolean);
 }
 
-/* ===================== DATA INLEZEN (1 CSV) ===================== */
-function buildData(rows){
-  if(!rows || !rows.length) throw new Error('Lege data CSV');
-  const header = rows[0].map(h => String(h||''));
-  const headerNorm = header.map(h=>removeDiacritics(h).replace(/\s+/g,' ').trim());
+function levenshtein(a,b){
+  a = norm(a); b = norm(b);
+  const m=a.length, n=b.length;
+  if(!m) return n;
+  if(!n) return m;
+  const dp = [];
+  for(let i=0;i<=m;i++){ dp[i]=[i]; }
+  for(let j=1;j<=n;j++){ dp[0][j]=j; }
 
-  const findCol = (needles) => { for(let i=0;i<headerNorm.length;i++){ if(needles.some(n => headerNorm[i].includes(n))) return i; } return -1; };
-
-  // robuuste herkenning naam/loc/spec
-  const iName = findCol(['naam','naam collega','voor- en achternaam','voornaam','achternaam','collega','medewerker','naam?','naam van collega']);
-  const iLoc  = findCol(['locatie','locaties','locatie(s)','op welke locatie','werk je','werkzaam','standplaats','vestiging','waar werk je','op welke locaties']);
-  const iSpec = findCol(['specifieke behandelingen','spec beh','specbeh','specifieke','behandelingen (specbeh)','spec-beh','spec behandelingen']);
-
-  if(iName < 0 || iLoc < 0){
-    setStatus(`Kolommen niet gevonden: Naam=${iName}, Locatie=${iLoc}. Controleer kopjes in je sheet.`, true);
-    throw new Error('Kon verplichte kolommen niet vinden (Naam en Locatie).');
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      const cost = a[i-1]===b[j-1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i-1][j]+1,
+        dp[i][j-1]+1,
+        dp[i-1][j-1]+cost
+      );
+    }
   }
+  return dp[m][n];
+}
 
-  // alle overige kolommen => potentiële categorie
-  const skip = new Set([iName,iLoc,iSpec].filter(x=>x>=0));
-  const categoryCols = [];
-  for(let c=0;c<header.length;c++){
-    if(skip.has(c)) continue;
-    const label = cleanLabel(header[c]);
-    if(label) categoryCols.push({index:c,label});
+function fuzzyScore(q,t){
+  q = norm(q); t = norm(t);
+  if(!q || !t) return 0;
+  if(t.includes(q) || q.includes(t)) return 1;
+  const d = levenshtein(q,t);
+  const maxLen = Math.max(q.length,t.length);
+  const sim = 1 - d/maxLen;
+  if(sim>=0.8) return 1;
+  if(sim>=0.6) return 0.6;
+  if(sim>=0.45) return 0.3;
+  return 0;
+}
+function maxFuzzyScore(q,arr){
+  if(!q) return 0;
+  let best=0;
+  for(const t of arr){
+    const s=fuzzyScore(q,t);
+    if(s>best) best=s;
+    if(best===1) break;
   }
+  return best;
+}
 
-  // map sublabel → hoofden (op basis van HEAD_TOKENS)
-  HEADS = [...HEAD_TOKENS];
-  SUBS_BY_HEAD = new Map(HEADS.map(h=>[h,[]]));
-  HEAD_OF_LABEL = new Map();
+// RECORDS bouwen
+function buildRecords(rows){
+  RAW_ROWS = rows;
+  RECORDS = [];
+  ALL_LOCATIONS=[];
+  ALL_SUBS=[];
+  const subsSet=new Set();
+  HEAD_META = HEAD_KEYS.map(k=>({key:k,label:k}));
 
-  for(const col of categoryCols){
-    const heads = HEADS.filter(h => similarLabel(h, col.label));
-    if(heads.length===0 && similarLabel(col.label,'Specifieke behandelingen')){
-      heads.push('Specifieke behandelingen');
-    }
-    if(heads.length===0){
-      // als niets matcht, probeer grof te mappen op sleutelwoorden
-      if(similarLabel(col.label,'arm')) heads.push('Armen');
-      else if(similarLabel(col.label,'been')||similarLabel(col.label,'heup')) heads.push('Benen');
-      else if(similarLabel(col.label,'wervel')||similarLabel(col.label,'rug')||similarLabel(col.label,'nek')) heads.push('Wervelkolom');
-    }
-    if(heads.length===0){
-      // geen head → sla toch op als losse sub onder "Specifieke behandelingen"
-      heads.push('Specifieke behandelingen');
-    }
-    HEAD_OF_LABEL.set(col.label, heads);
-    heads.forEach(h=>{
-      if(!SUBS_BY_HEAD.has(h)) SUBS_BY_HEAD.set(h, []);
-      SUBS_BY_HEAD.get(h).push(col.label);
+  for(const row of rows){
+    const name = (row[NAME_KEY]||"").trim();
+    if(!name) continue;
+
+    const locations = splitLocations(row[LOC_KEY]||"");
+
+    const heads=[];
+    const subsByHead={};
+    const allSubs=[];
+
+    HEAD_KEYS.forEach(headKey=>{
+      const cell=row[headKey];
+      const subs = splitSubs(cell);
+      if(subs.length){
+        heads.push(headKey);
+        subsByHead[headKey]=subs;
+        subs.forEach(s=>subsSet.add(s));
+        allSubs.push(...subs);
+      }
+    });
+
+    const spec = splitSubs(row[SPEC_KEY]||"");
+    spec.forEach(s=>{ subsSet.add(s); allSubs.push(s); });
+
+    ALL_LOCATIONS.push(...locations);
+
+    RECORDS.push({
+      name,
+      locations,
+      heads,
+      subsByHead,
+      allSubs
     });
   }
 
-  const out = [];
-  const locsSet = new Set();
-  for(let r=1;r<rows.length;r++){
-    const row = rows[r]; if(!row || row.length===0) continue;
-    const name = (row[iName]||'').toString().trim(); if(!name) continue;
+  ALL_LOCATIONS = Array.from(new Set(ALL_LOCATIONS)).sort();
+  ALL_SUBS = Array.from(subsSet).sort();
 
-    const locations = splitLoc(row[iLoc]||''); locations.forEach(l=>locsSet.add(l));
-
-    const cats = [];
-    for(const col of categoryCols){
-      const v = row[col.index];
-      if(isTruthy(v)) cats.push(col.label);
-    }
-    // Specifieke behandelingen los als sublabels
-    if(iSpec >= 0){
-      const raw=(row[iSpec]||'').toString().trim();
-      if(raw){
-        raw.split(',').forEach(p=>{
-          const clean = cleanLabel(p);
-          if(clean && !cats.includes(clean)) cats.push(clean);
-          if(clean && !HEAD_OF_LABEL.has(clean)){
-            HEAD_OF_LABEL.set(clean, ['Specifieke behandelingen']);
-            const arr = SUBS_BY_HEAD.get('Specifieke behandelingen') || [];
-            if(!arr.includes(clean)) { arr.push(clean); SUBS_BY_HEAD.set('Specifieke behandelingen', arr); }
-          }
-        });
-      }
-    }
-    out.push({ name, locations, categories: cats });
-  }
-
-  DATA = out;
-  ALL_LOCS = Array.from(locsSet).sort((a,b)=>a.localeCompare(b));
-
-  // sorteer subs per head
-  for(const h of SUBS_BY_HEAD.keys()){
-    SUBS_BY_HEAD.set(h, Array.from(new Set(SUBS_BY_HEAD.get(h))).sort((a,b)=>a.localeCompare(b)));
-  }
+  populateLocationList();
+  renderHeadChips();
+  renderSubChips();
+  applyFilters();
 }
 
-/* ===================== UI: Hoofd → Sub ===================== */
-function populateHeads(){
-  const el = els.head; el.innerHTML = "";
-  const heads = Array.from(SUBS_BY_HEAD.keys()).filter(h=> (SUBS_BY_HEAD.get(h)||[]).length>0);
-  heads.sort((a,b)=>a.localeCompare(b));
-  heads.forEach(h=>{
-    const o=document.createElement('option'); o.value=h; o.textContent=h; el.appendChild(o);
-  });
-}
-function populateSubs(){
-  const head = els.head.value;
-  const el = els.subs; el.innerHTML="";
-  const subs = SUBS_BY_HEAD.get(head)||[];
-  subs.forEach(s=>{
-    const o=document.createElement('option'); o.value=s; o.textContent=s; el.appendChild(o);
+function populateLocationList(){
+  locList.innerHTML="";
+  ALL_LOCATIONS.forEach(loc=>{
+    const opt=document.createElement("option");
+    opt.value=loc;
+    opt.textContent=loc;
+    locList.appendChild(opt);
   });
 }
 
-/* ===================== LOCATIES ===================== */
-function populateLocations(){
-  const sel = els.locSelect; sel.innerHTML = "";
-  ALL_LOCS.forEach(l=>{
-    const o = document.createElement('option'); o.value=l; o.textContent=l; sel.appendChild(o);
+function renderHeadChips(){
+  headChipsWrap.innerHTML="";
+  HEAD_META.forEach(h=>{
+    const chip=document.createElement("span");
+    chip.className="chip chip-toggle";
+    chip.textContent=h.label;
+    chip.dataset.key=h.key;
+    chip.onclick=()=>{ chip.classList.toggle("active"); applyFilters(); };
+    headChipsWrap.appendChild(chip);
   });
 }
-
-/* ===================== MATCHING ===================== */
-function labelBelongsToHead(label, head){
-  const heads = HEAD_OF_LABEL.get(label) || [];
-  return heads.some(h => h===head || similarLabel(h, head));
-}
-function hasAnyLabelInHead(colleague, head){
-  return colleague.categories.some(lbl => labelBelongsToHead(lbl, head));
-}
-function hasExactLabel(colleague, label){
-  return colleague.categories.some(lbl => similarLabel(lbl, label));
-}
-function matchesLocation(colleague, selected, free){
-  let ok=false;
-  if(selected.length){
-    const set=new Set(colleague.locations.map(x=>norm(x)));
-    ok = selected.some(v=>set.has(norm(v)));
-  }
-  if(!ok && free){
-    const t = norm(free);
-    ok = colleague.locations.some(l=>norm(l).includes(t));
-  }
-  return ok;
+function selectedHeads(){
+  return [...headChipsWrap.querySelectorAll(".chip-toggle.active")]
+    .map(el=>el.dataset.key);
 }
 
-/* Scoring:
-   - Als er subs zijn gekozen:
-       per sub 1.0 bij fuzzy exact; 0.6 bij andere sub binnen dezelfde head; 0 anders
-   - Als GEEN sub is gekozen maar WEL head: 1.0 als collega ≥1 sub in die head heeft; 0 anders
-   - Locatie (indien ingevuld): +1.0 bij match
-*/
-function scoreColleague(colleague){
-  let points=0, possible=0;
-  const notes=[];
-
-  const head = els.head.value;
-  const chosenSubs = Array.from(els.subs.selectedOptions).map(o=>o.value);
-
-  if(chosenSubs.length>0){
-    for(const sub of chosenSubs){
-      possible += 1;
-      if(hasExactLabel(colleague, sub)){
-        points += 1.0; notes.push({type:'good',txt:`Sub: ${sub}`});
-      }else if(hasAnyLabelInHead(colleague, head)){
-        points += 0.6; notes.push({type:'warn',txt:`Wel ${head}, andere sub`});
-      }else{
-        notes.push({type:'bad',txt:`Geen ${head}/${sub}`});
-      }
-    }
-  }else if(head){
-    possible += 1;
-    if(hasAnyLabelInHead(colleague, head)){
-      points += 1.0; notes.push({type:'good',txt:`Hoofd: ${head}`});
-    }else{
-      notes.push({type:'bad',txt:`Geen ${head}`});
-    }
-  }
-
-  const selLocs = Array.from(els.locSelect.selectedOptions).map(o=>o.value);
-  const freeLoc = els.locFree.value.trim();
-  if(selLocs.length || freeLoc){
-    possible += 1;
-    if(matchesLocation(colleague, selLocs, freeLoc)){
-      points += 1.0; notes.push({type:'good',txt:`Locatie match`});
-    }else{
-      notes.push({type:'warn',txt:`Locatie mist`});
-    }
-  }
-
-  const pct = possible>0 ? Math.round(100*points/possible) : 0;
-  return { pct, notes };
-}
-
-/* ===================== RENDER ===================== */
-function renderResults(list){
-  els.results.innerHTML="";
-  els.count.textContent = `${list.length} resultaten`;
-  list.forEach(r=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML = `
-      <td><div class="name">${r.name}</div></td>
-      <td>${r.locations.map(l=>`<span class="chip">${l}</span>`).join(' ')}</td>
-      <td>${r.categories.map(c=>`<span class="chip">${c}</span>`).join(' ')}</td>
-      <td>
-        <div class="kpi">
-          <div style="min-width:46px;font-weight:600">${r._score.pct}%</div>
-          <div class="meter" style="flex:1"><div class="bar" style="width:${r._score.pct}%"></div></div>
-        </div>
-        <div style="margin-top:6px">
-          ${r._score.notes.map(n=>`<span class="badge ${n.type}">${n.txt}</span>`).join(' ')}
-        </div>
-      </td>`;
-    els.results.appendChild(tr);
+function renderSubChips(){
+  subChipsWrap.innerHTML="";
+  ALL_SUBS.slice(0,15).forEach(sub=>{
+    const chip=document.createElement("span");
+    chip.className="chip chip-small chip-toggle";
+    chip.textContent=sub;
+    chip.onclick=()=>{ subQueryInput.value=sub; applyFilters(); };
+    subChipsWrap.appendChild(chip);
   });
 }
+function selectedLocations(){
+  return [...locList.selectedOptions].map(o=>o.value);
+}
+
+// MATCHBEREKENING
+function computeMatchScore(rec,filters){
+  const {locQuery,locList,heads,subQuery} = filters;
+  const W_LOC=0.2, W_HEAD=0.3, W_SUB=0.5;
+
+  if(!locQuery && !locList.length && !heads.length && !subQuery) return 0;
+
+  let maxScore=0, locScore=0, headScore=0, subScore=0;
+
+  if(locQuery || locList.length){
+    maxScore+=W_LOC;
+    let s=0;
+    if(locQuery) s=Math.max(s,maxFuzzyScore(locQuery,rec.locations));
+    if(locList.length){
+      const nsel=locList.map(norm);
+      const nrec=rec.locations.map(norm);
+      if(nsel.some(x=>nrec.includes(x))) s=Math.max(s,1);
+    }
+    locScore=W_LOC*s;
+  }
+  if(heads.length){
+    maxScore+=W_HEAD;
+    const set=new Set(rec.heads);
+    headScore = heads.some(h=>set.has(h)) ? W_HEAD : 0;
+  }
+  if(subQuery){
+    maxScore+=W_SUB;
+    const s=maxFuzzyScore(subQuery,rec.allSubs);
+    subScore=W_SUB*s;
+  }
+
+  if(locScore>0 && subScore>=W_SUB*0.9) return 100;
+  if(!locQuery && !locList.length && !heads.length && subScore>=W_SUB*0.9) return 100;
+
+  if(maxScore===0) return 0;
+  return Math.round((locScore+headScore+subScore)/maxScore * 100);
+}
+
+// Toepassen & tonen
 function applyFilters(){
-  const res = DATA.map(d=>({...d, _score:scoreColleague(d)}))
-                  .sort((a,b)=> b._score.pct - a._score.pct);
-  renderResults(res);
+  const filters={
+    locQuery:locQueryInput.value.trim(),
+    locList:selectedLocations(),
+    heads:selectedHeads(),
+    subQuery:subQueryInput.value.trim(),
+    nameQuery:nameQueryInput.value.trim()
+  };
+
+  const hideZero=hideZeroCb.checked;
+
+  const enriched = RECORDS.map(rec=>{
+    let score=computeMatchScore(rec,filters);
+    if(filters.nameQuery){
+      const hay=[rec.name,...rec.locations,...rec.heads,...rec.allSubs].join(" | ");
+      const s=fuzzyScore(filters.nameQuery,hay);
+      if(s===0) score=-1;
+      else score=Math.min(100,score+Math.round(20*s));
+    }
+    return {rec,score};
+  });
+
+  const filtered = enriched
+    .filter(x=>x.score>=0)
+    .filter(x=>!hideZero || x.score>0)
+    .sort((a,b)=>b.score - a.score || a.rec.name.localeCompare(b.rec.name,"nl"));
+
+  renderResults(filtered);
 }
 
-/* ===================== INIT/LOAD ===================== */
-async function loadAll(){
+function renderResults(list){
+  resultsBody.innerHTML="";
+  list.forEach(({rec,score})=>{
+    const tr=document.createElement("tr");
+
+    const tdName=document.createElement("td");
+    tdName.innerHTML=`<div class="name">${rec.name}</div><div class="score-pill">Match: ${score}%</div>`;
+
+    const tdLoc=document.createElement("td");
+    tdLoc.innerHTML=rec.locations.map(l=>`<span class="chip chip-small">${l}</span>`).join(" ");
+
+    const tdCat=document.createElement("td");
+    const parts=[];
+    rec.heads.forEach(h=>{
+      const subs=rec.subsByHead[h]||[];
+      if(subs.length){
+        parts.push(
+          `<div><span class="chip chip-small">${h}</span> ${
+            subs.map(s=>`<span class="chip chip-small">${s}</span>`).join(" ")
+          }</div>`
+        );
+      }
+    });
+    tdCat.innerHTML = parts.join("");
+    tr.append(tdName,tdLoc,tdCat);
+    resultsBody.appendChild(tr);
+  });
+
+  resultCountEl.textContent=`${list.length} resultaat${list.length===1?"":"en"}`;
+}
+
+// CSV
+function exportCurrentSelection(){
+  const rows=[["Naam","Locaties","Hoofdcategorieën","Subcategorieën"]];
+  const table=[...resultsBody.querySelectorAll("tr")];
+  table.forEach(tr=>{
+    const name = tr.children[0].querySelector(".name").textContent;
+    const locs = [...tr.children[1].querySelectorAll(".chip")].map(c=>c.textContent).join(" | ");
+    const cats = tr.children[2].innerText.replace(/\n+/g," | ");
+    rows.push([name,locs,cats]);
+  });
+
+  const csv = rows.map(r=>r.map(x=>`"${x.replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="monne_zoekresultaten.csv";
+  a.click();
+}
+
+// EVENTS
+[locQueryInput,subQueryInput,nameQueryInput].forEach(input=>{
+  input.addEventListener("input",applyFilters);
+});
+locList.addEventListener("change",applyFilters);
+hideZeroCb.addEventListener("change",applyFilters);
+clearFiltersBtn.addEventListener("click",()=>{
+  locQueryInput.value="";
+  subQueryInput.value="";
+  nameQueryInput.value="";
+  hideZeroCb.checked=false;
+  [...locList.options].forEach(o=>o.selected=false);
+  [...headChipsWrap.querySelectorAll(".chip-toggle.active")].forEach(c=>c.classList.remove("active"));
+  applyFilters();
+});
+exportBtn.addEventListener("click",exportCurrentSelection);
+
+// ===== AUTOMATISCH LADEN BIJ START =====
+(async function autoLoad(){
+  setStatus("Laden van Google Sheet...", false);
   try{
-    setStatus('Data laden…');
-    const dataRows = await fetchCSV(DATA_URL_DEFAULT);
-    buildData(dataRows);
-    populateHeads();
-    populateSubs();
-    populateLocations();
-    applyFilters();
-    setStatus('Data geladen.');
-  }catch(e){
-    setStatus('Fout bij laden: ' + (e.message||e), true);
+    const res = await fetch(DEFAULT_OPENSHEET_URL);
+    const json = await res.json();
+    setStatus("Data geladen.", false);
+    buildRecords(json);
+  } catch(e){
+    console.error(e);
+    setStatus("Fout: kon de sheet niet laden.", true);
   }
-}
-
-/* ===================== EVENTS ===================== */
-els.head.addEventListener('change', ()=>{
-  populateSubs();
-  applyFilters();
-});
-els.subs.addEventListener('change', applyFilters);
-els.subsAll.addEventListener('click', ()=>{
-  Array.from(els.subs.options).forEach(o=>o.selected=true);
-  applyFilters();
-});
-els.subsNone.addEventListener('click', ()=>{
-  Array.from(els.subs.options).forEach(o=>o.selected=false);
-  applyFilters();
-});
-els.locFree.addEventListener('input', applyFilters);
-els.locSelect.addEventListener('change', applyFilters);
-els.reset.addEventListener('click', ()=>{
-  els.locFree.value="";
-  Array.from(els.locSelect.options).forEach(o=>o.selected=false);
-  Array.from(els.subs.options).forEach(o=>o.selected=false);
-  applyFilters();
-});
-els.refresh.addEventListener('click', loadAll);
-
-/* ===================== AUTO REFRESH ===================== */
-loadAll();
-const AUTO_REFRESH_MS = 24*60*60*1000;
-setInterval(()=>loadAll(), AUTO_REFRESH_MS);
+})();
 </script>
-</body>
-</html>
